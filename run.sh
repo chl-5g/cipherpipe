@@ -2,9 +2,13 @@
 # CipherPipe — Nostr bridge runner
 cd "$(dirname "$0")"
 
-PROXY_PORT="${1:-8701}"
-OLD_PID=$(lsof -ti :"$PROXY_PORT" 2>/dev/null)
+# Load .env
+[ -f .env ] && export $(grep -v '^#' .env | grep -v '^$' | xargs)
+
+PORT="${CP_PORT:-8700}"
+OLD_PID=$(lsof -ti :"$PORT" 2>/dev/null)
 [ -n "$OLD_PID" ] && kill -9 $OLD_PID 2>/dev/null && sleep 1
 
-echo "[$(date '+%H:%M:%S')] CipherPipe Nostr bridge on :$PROXY_PORT → http://localhost:$PROXY_PORT"
-python3 proxy.py
+export PYTHONPATH="$(dirname "$0")/src:$PYTHONPATH"
+echo "[$(date '+%H:%M:%S')] CipherPipe on :$PORT → http://localhost:$PORT"
+python3 src/cipherpipe/proxy.py

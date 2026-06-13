@@ -1,7 +1,9 @@
-*.db
-*.key
-nostr.key
 __pycache__/
+data/*.key
+data/*.db
+data/inbox.jsonl
+data/outbox.jsonl
 logs/
-archive/
-cipherpipe.db*
+.env
+data/downloads/
+.DS_Store

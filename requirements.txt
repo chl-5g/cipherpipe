@@ -2,3 +2,5 @@ websockets>=14.1
 cryptography>=44.0
 structlog>=24.0
 coincurve>=21.0
+zeroconf>=0.132
+python-socks>=2.0

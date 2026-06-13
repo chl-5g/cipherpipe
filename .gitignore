@@ -1,6 +1,8 @@
 __pycache__/
 data/*.key
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/inbox.jsonl
 data/outbox.jsonl
 logs/

@@ -10,11 +10,9 @@
 
 ### 三个核心约束
 
-1. **服务器零知识** — relay 只转发加密 blob，永不解密，也不需要解密。管道不持有明文的任何时刻。
-
+1. **服务器零知识** — relay 只转发加密 blob，永不解密。管道不持有明文的任何时刻。
 2. **参与者平等** — 对 relay 来说，所有 client 都是两个公钥在互发加密事件。没有角色区别，只有 senders 和 receivers。
-
-3. **无单点故障** — 同时连多个 Nostr relay，挂一个自动切另一个。不通 IP、不依赖单一实体、不存在"服务器宕机"。
+3. **无单点故障** — 同时连多个 Nostr relay，挂一个自动切另一个。
 
 ### 管道不做什么
 
@@ -25,58 +23,128 @@
 ### 管道做什么
 
 - **路由**。身份 = Nostr 公钥，relay 的 `#p` tag 过滤就是"找对方"的机制。
-- **加密运输**。NIP-44 端到端加密，client → proxy → relay → peer，全程密文。
+- **加密运输**。NIP-44 端到端加密，全程密文。
 - **自动降级**。LAN 可达走毫秒直连，不可达自动走全球 relay 网络。
 
 ### 为什么不需要自己的服务器
 
-Nostr 全球有几千个公共 relay。CipherPipe 启动时向所有 relay 开持久 WebSocket，消息来了即时推送。relay 之间不互相同步，靠客户端向多个 relay 同时发布保证到达。不依赖单一 relay，不存在"服务器宕机"——挂了一个，其他的继续跑。
+Nostr 全球有几千个公共 relay。CipherPipe 启动时向所有 relay 开持久 WebSocket，消息即时推送。relay 之间不互相同步，靠客户端向多个 relay 同时发布保证到达。不依赖单一 relay——挂了一个，其他的继续跑。
+
+## 架构
+
+```
+任何 client ──WS──→ Hub ──┬── LAN peer（毫秒）
+                          └── Nostr relay（全球可达）
+```
+
+- **Hub** 是唯一中间层：路由、持久化、送达确认、消息状态。没有传统意义上的"服务器"。
+- **Client** 是 thin client：只做输入/输出/显示。不处理路由、加密、协议。
+- **消息协议统一**：所有 client 发相同的消息格式，收相同的消息格式。
 
 ## 项目结构
 
 ```
-src/cipherpipe/     # Python 包
-├── proxy.py        # 核心：Nostr 桥 + 浏览器入口 + LAN 直连
-├── agent.py        # Agent 客户端（LAN peer，收消息/文件）
-├── cli.py          # 人类 CLI 客户端
-├── config.py       # 统一配置（.env → 全局读取）
-├── nostr_crypto.py # NIP-44 加解密 + BIP-340 Schnorr 签名
-├── storage.py      # SQLite 持久化（消息、联系人、状态）
-├── relay_manager.py# Relay 延迟排序与连接管理
-├── file_handler.py # 文件分片收发
-├── lan_discovery.py# 局域网服务发现
-└── dashboard.html  # 浏览器聊天 UI（零加密逻辑）
-
-data/               # 运行时数据
-├── nostr.key       # Proxy 身份私钥
-├── claude.key      # Agent 身份私钥
-├── cipherpipe.db   # 消息/联系人存储
-├── inbox.jsonl     # Agent 收件箱
-├── outbox.jsonl    # Agent 发件箱
-└── downloads/      # 接收的文件
+cipherpipe/
+├── backend/                    # Hub 中间层
+│   ├── hub/
+│   │   ├── proxy.py           # WebSocket/HTTP 入口，消息路由核心
+│   │   └── router.py          # PeerRouter — LAN/relay 路由策略
+│   ├── core/
+│   │   ├── config.py          # .env 配置加载
+│   │   ├── crypto.py          # NIP-44 加解密 + BIP-340 签名
+│   │   └── store.py           # SQLite 持久化（消息/联系人/状态）
+│   ├── network/
+│   │   ├── relay.py           # Nostr relay 连接池管理
+│   │   └── lan.py             # mDNS LAN 节点发现
+│   ├── file/
+│   │   └── transfer.py        # 文件分片收发 + forward_file()
+│   └── agent.py               # 对端 Agent（收消息/文件，可选自动回复）
+├── frontend/                   # 客户端（thin client）
+│   ├── web/
+│   │   └── Dashboard.vue      # 浏览器 UI（Vue 3，零加密逻辑）
+│   └── cli/
+│       └── cli.py             # 终端聊天客户端
+├── tests/
+│   └── test_transfer.py       # 消息+文件传输测试（5/5）
+├── data/                       # 运行时数据
+│   ├── nostr.key              # Hub 身份私钥（自动生成）
+│   ├── *.key                  # 各 client 身份私钥
+│   ├── cipherpipe.db          # SQLite 数据库
+│   ├── inbox.jsonl            # Agent 收件箱
+│   ├── outbox.jsonl           # Agent 发件箱
+│   └── downloads/             # 接收的文件
+├── run.sh                      # 启动 Hub
+├── cipherchat                  # 终端聊天快捷入口
+├── .env                        # 环境变量
+└── logs/                       # Hub 日志（JSONL）
 ```
 
 ## 快速开始
 
 ```bash
-# 启动 proxy
+# 1. 启动 Hub
 bash run.sh
 
-# 另开终端，启动 agent
-python3 src/cipherpipe/agent.py --keyfile data/claude.key
+# 2. 创建身份（CLI）
+./cipherchat create          # 生成私钥，打印公钥
+
+# 3. 终端聊天
+./cipherchat <对方公钥>       # 输入对方公钥，开始聊天
+
+# 4. 浏览器
+open http://localhost:8700
+# 点击"创建身份"，拿到公钥
+# 把公钥发给对方，添加对方公钥，开始聊天
+
+# 5. Agent（可选）
+PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key
 ```
 
-浏览器打开 `http://localhost:8700`，添加联系人公钥即可。
+## 消息协议
 
-## 三层传输
+**客户端 → Hub：**
+```json
+{"type": "msg", "text": "hello", "to": "<对方公钥>"}
+{"type": "file", "name": "a.pdf", "size": 12345, "to": "<对方公钥>"}
+<binary data>   ← 紧跟在 file header 后面的二进制帧
+```
 
-| 层 | 延迟 | 用途 |
-|----|------|------|
-| LAN WebSocket | <1ms | 同机/同局域网 agent 直连，不经过 relay |
-| Nostr relay 池 | 实时推送 | 跨网络、跨地域。加密事件全球 relay 转发 |
-| Browser proxy | <1ms | 浏览器 ↔ proxy 明文。密钥只存 proxy |
+**Hub → 客户端：**
+```json
+{"type": "msg", "id": "...", "from": "<发件人>", "text": "hello", "delivered": true}
+{"type": "file", "id": "...", "from": "<发件人>", "name": "a.pdf", "size": 12345}
+```
 
-路由策略：先查 LAN_CLIENTS，命中走 LAN 毫秒级；未命中走 Nostr relay。
+所有中间逻辑（路由、持久化、送达确认、reaction、typing）由 Hub 统一处理。
+
+## 已读/送达
+
+- LAN 消息：Hub 转发即送达 → `delivered: true` → 发送方显示 `✓`（蓝色）
+- Nostr 消息：发布到 relay → `delivered: false` → 发送方显示 `✓`（灰色）
+- 客户端不处理已读逻辑，所有状态由 Hub 推送
+
+## 文件传输
+
+统一协议：`{type:'file', name, size, to}` + 二进制 WebSocket frame。
+
+1. 客户端发送 JSON header + 原始文件数据（二进制帧）
+2. Hub 接收 → 落盘 → 转发给对端（LAN 直传 / Nostr 分片）
+3. Hub 通知收发双方
+
+客户端零分片、零 base64、零协议知识。超 `CP_FILE_MAX_SIZE`（.env 可配，默认 100MB）直接拒绝。
+
+## CLI 命令
+
+```bash
+./cipherchat create           # 生成/查看自己的公钥
+./cipherchat show             # 显示已有公钥
+./cipherchat <对方公钥>        # 开始聊天
+./cipherchat                  # 交互式：输入对方公钥后聊天
+
+聊天内命令：
+  /send <文件路径>             发送文件
+  /quit                       退出
+```
 
 ## 加密
 
@@ -85,26 +153,29 @@ python3 src/cipherpipe/agent.py --keyfile data/claude.key
 - 签名：BIP-340 Schnorr
 - 每条消息独立随机 nonce，防重放
 
-## Agent 模式
+## 配置
+
+`.env` 可配项：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CP_PORT` | 8700 | Hub 端口 |
+| `CP_RELAYS` | damus.io, nos.lol, nostr.band | Nostr relay 列表 |
+| `CP_KEY_FILE` | nostr.key | Hub 身份私钥 |
+| `CP_FILE_MAX_SIZE` | 104857600 (100MB) | 文件上传上限 |
+
+## 开发原则
+
+- **客户端只做 I/O**：消息收发和显示，不做路由/加密/状态管理
+- **Hub 处理一切**：路由、持久化、送达确认、消息状态
+- **零硬编码**：配置从 `.env` → config.py 统一加载
+- **TDD**：先写测试 → 看测试失败 → 写代码 → 看测试通过
+
+## 测试
 
 ```bash
-# 纯管道（默认），收消息写 inbox
-python3 src/cipherpipe/agent.py --keyfile data/claude.key
-
-# echo 测试模式
-python3 src/cipherpipe/agent.py --keyfile data/claude.key --reply-mode echo
-
-# 外部命令模式（消息 stdin 传入，stdout 作为回复）
-python3 src/cipherpipe/agent.py --keyfile data/claude.key --reply-mode cmd:./my_ai.sh
+pytest tests/ -v --asyncio-mode=auto
 ```
-
-## 文件传输
-
-分片传输，不依赖 WebSocket 单帧大小限制：
-
-`file_start` → N×`file_chunk`(256KB/片) → `file_end`
-
-Proxy 转发分片到 peer，peer 拼装落盘 `data/downloads/`。
 
 ## 依赖
 

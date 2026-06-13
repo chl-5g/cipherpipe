@@ -28,8 +28,42 @@ usage() {
     exit 0
 }
 
+KEYFILE="data/cli.key"
+
+cmd_create() {
+    show_banner
+    python3 -c "
+import sys; sys.path.insert(0, '.')
+from backend.core.crypto import load_or_create_key
+sk = load_or_create_key('$KEYFILE')
+print('你的身份已创建：')
+print()
+print('  \033[32m' + sk.public_key.format().hex() + '\033[0m')
+print()
+print('把这个公钥发给对方，让他用 ./cipherchat <你的公钥> 连接你。')
+"
+    exit 0
+}
+
+cmd_show() {
+    if [ -f "$KEYFILE" ]; then
+        python3 -c "
+import sys; sys.path.insert(0, '.')
+from backend.core.crypto import load_or_create_key
+sk = load_or_create_key('$KEYFILE')
+print(sk.public_key.format().hex())
+"
+    else
+        echo "尚未创建身份，先运行 ./cipherchat create"
+        exit 1
+    fi
+    exit 0
+}
+
 case "${1}" in
     -h|--help) usage ;;
+    create)    cmd_create ;;
+    show)      cmd_show ;;
 esac
 
 PEER="${1}"
@@ -60,4 +94,4 @@ elif ! validate_pubkey "$PEER"; then
     exit 1
 fi
 
-python3 frontend/cli/cli.py --keyfile data/cli.key --connect-lan localhost --peer "$PEER"
+python3 frontend/cli/cli.py --keyfile "$KEYFILE" --connect-lan localhost --peer "$PEER"

@@ -51,7 +51,12 @@ async def main():
                 frame = json.loads(raw)
                 t = frame.get("type", "")
                 frm = frame.get("from", "")
-                if t == "msg" and frm and frm != "me":
+                if t == "msg" and frm == "me":
+                    txt = frame.get("text","")
+                    if frame.get("delivered"):
+                        await _display.put(f"\033[34m✓ 已送达\033[0m")
+                    continue
+                if t == "msg" and frm:
                     await _display.put(f"\033[36m{frm}\033[0m \033[2m{_ts()}\033[0m  {frame.get('text','')}")
                 elif t == "file":
                     await _display.put(f"\033[36m{frm}\033[0m \033[2m{_ts()}\033[0m  [file: {frame.get('name','')} ({frame.get('size',0)}B)]")
@@ -101,7 +106,7 @@ async def main():
             else:
                 _print(f"\033[31mfile not found: {filepath}\033[0m")
             continue
-        _print(f"\033[2m{_ts()} →\033[0m {text}")
+        _print(f"\033[2m{_ts()}\033[0m {text}")
         await ws.send(json.dumps({"type": "msg", "text": text, "to": peer}))
 
 

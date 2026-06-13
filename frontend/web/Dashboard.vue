@@ -73,7 +73,11 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
   <div class="sidebar">
     <h2>CipherPipe</h2>
     <div class="sidebar-actions">
+      <button @click="createIdentity">创建身份</button>
       <button @click="toggleTheme">{{ themeLabel }}</button>
+    </div>
+    <div v-if="myPubkey" style="padding:6px 10px;font-size:10px;color:var(--text2);word-break:break-all">
+      我的公钥: {{ myPubkey }}
     </div>
     <input class="search" v-model="searchQuery" placeholder="搜索消息..." @input="search">
     <div class="peers">
@@ -113,7 +117,7 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
         </div>
         <div class="meta">
           <span>{{ m.dir === 'out' ? 'me' : m.from }} 🔒</span>
-          <span v-if="m.dir==='out'" :style="{color: m.delivered ? '#58a6ff' : '#8b949e', fontSize:'10px'}">{{ m.delivered ? '✓✓' : '✓' }}</span>
+          <span v-if="m.dir==='out'" :style="{color: m.delivered ? '#58a6ff' : '#8b949e', fontSize:'10px'}">✓</span>
         </div>
         <div class="body">{{ m.text }}</div>
         <div v-if="m.reactions" class="rx">{{ m.reactions }}</div>
@@ -135,6 +139,7 @@ createApp({
   setup() {
     const ws = ref(null);
     const currentPeer = ref(null);
+    const myPubkey = ref(localStorage.getItem('cp_my_pubkey') || '');
     const peers = ref(JSON.parse(localStorage.getItem('cp_peers') || '[]').map(p => typeof p === 'string' ? {pubkey:p, petname:''} : p));
     const messages = ref([]);
     const inputText = ref('');
@@ -179,6 +184,20 @@ createApp({
       };
       ws.value.onmessage = (e) => {
         const msg = JSON.parse(e.data);
+        if (msg.type === 'identity_created') {
+          myPubkey.value = msg.pubkey;
+          localStorage.setItem('cp_my_pubkey', msg.pubkey);
+          ws.value.send(JSON.stringify({type:'lan_hello', pubkey: msg.pubkey}));
+          return;
+        }
+        if (msg.type === 'identity') {
+          if (myPubkey.value) {
+            ws.value.send(JSON.stringify({type:'lan_hello', pubkey: myPubkey.value}));
+          } else {
+            ws.value.send(JSON.stringify({type:'create_identity'}));
+          }
+          return;
+        }
         if (msg.type === 'typing') {
           typingText.value = msg.from + ' 正在输入...';
           clearTimeout(typingTimeout);
@@ -234,6 +253,11 @@ createApp({
           }
         }
       };
+    }
+
+    function createIdentity() {
+      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return;
+      ws.value.send(JSON.stringify({type:'create_identity'}));
     }
 
     function addMsg(from, text, dir, eventId, prepend = false, delivered = false) {
@@ -330,9 +354,9 @@ createApp({
     onMounted(() => { connect(); });
 
     return {
-      currentPeer, peers, messages, inputText, searchQuery, statusText, statusClass,
+      currentPeer, myPubkey, peers, messages, inputText, searchQuery, statusText, statusClass,
       typingText, chatTitle, msgContainer, themeLabel, toggleTheme,
-      send, sendFile, onTyping, react, delMsg, addPeer, delPeer, switchPeer, search
+      send, sendFile, onTyping, react, delMsg, addPeer, delPeer, switchPeer, search, createIdentity
     };
   }
 }).mount('#app');

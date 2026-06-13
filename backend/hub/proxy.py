@@ -342,6 +342,9 @@ async def ws_handler(websocket):
                     add_message(f"rxn_{PUBKEY[:12]}_{eid}_{emoji}", peer, emoji, "out", msg_type="reaction")
             elif t == "contacts":
                 await websocket.send(json.dumps({"type": "contacts", "data": list_contacts()}))
+            elif t == "create_identity":
+                sk = load_or_create_key()
+                await websocket.send(json.dumps({"type":"identity_created","pubkey":sk.public_key.format().hex()}))
             elif t == "delete_contact":
                 pk = frame.get("pubkey", "")
                 if pk: delete_contact(pk)

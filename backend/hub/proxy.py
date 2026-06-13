@@ -172,13 +172,13 @@ async def ws_handler(websocket):
                 text = frame.get("text", "")
                 eid = f"lan_{int(time.time()*1000)}"
                 if target in LAN_CLIENTS:
-                    out = json.dumps({"type": "msg", "id": eid, "from": peer_pubkey[:12], "text": text, "delivered": True})
+                    out = json.dumps({"type": "msg", "id": eid, "from": peer_pubkey, "text": text, "delivered": True})
                     await LAN_CLIENTS[target].send(out)
                     # Echo back to sender
                     await websocket.send(json.dumps({"type": "msg", "id": eid, "from": "me", "text": text, "delivered": True}))
                     add_message(eid, target, text, "in", delivered=1)
                 elif target == PUBKEY:
-                    out = json.dumps({"type": "msg", "id": eid, "from": peer_pubkey[:12], "text": text, "delivered": True})
+                    out = json.dumps({"type": "msg", "id": eid, "from": peer_pubkey, "text": text, "delivered": True})
                     for bw in list(BROWSERS):
                         try: await bw.send(out)
                         except Exception: BROWSERS.discard(bw)

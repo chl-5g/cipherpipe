@@ -112,16 +112,24 @@ PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key
 **Hub → 客户端：**
 ```json
 {"type": "msg", "id": "...", "from": "<发件人>", "text": "hello", "delivered": true}
-{"type": "file", "id": "...", "from": "<发件人>", "name": "a.pdf", "size": 12345}
+{"type": "read_receipt", "event_id": "..."}
 ```
+
+文件传输：Hub 收到后通过 LAN 直传或 Nostr 分片原样转发给对端，格式不变。
 
 所有中间逻辑（路由、持久化、送达确认、reaction、typing）由 Hub 统一处理。
 
 ## 已读/送达
 
-- LAN 消息：Hub 转发即送达 → `delivered: true` → 发送方显示 `✓`（蓝色）
-- Nostr 消息：发布到 relay → `delivered: false` → 发送方显示 `✓`（灰色）
-- 客户端不处理已读逻辑，所有状态由 Hub 推送
+两个概念：
+
+- **送达 (delivered)**：消息到达对端 WebSocket。LAN 直达即送达，Nostr relay 发布后等待。
+- **已读 (read)**：对端真正渲染到屏幕上（且页面可见），前端自动发 read_receipt。
+
+显示：
+- grey `✓` = 已发送
+- blue `✓` = 已送达
+- 对端 `document.visibilityState === 'visible'` 时自动回传已读
 
 ## 文件传输
 

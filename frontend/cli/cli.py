@@ -51,13 +51,20 @@ async def main():
                 frame = json.loads(raw)
                 t = frame.get("type", "")
                 frm = frame.get("from", "")
+                if t == "read_receipt":
+                    await _display.put("\033[34m✓ 对方已读\033[0m")
+                    continue
                 if t == "msg" and frm == "me":
                     txt = frame.get("text","")
                     if frame.get("delivered"):
                         await _display.put(f"\033[34m✓ 已送达\033[0m")
                     continue
                 if t == "msg" and frm:
-                    await _display.put(f"\033[36m{frm}\033[0m \033[2m{_ts()}\033[0m  {frame.get('text','')}")
+                    text = frame.get('text','')
+                    msg_id = frame.get('id','')
+                    await _display.put(f"\033[36m{frm}\033[0m \033[2m{_ts()}\033[0m  {text}")
+                    if msg_id:
+                        await ws.send(json.dumps({"type": "read_receipt", "event_id": msg_id, "peer": frm}))
                 elif t == "file":
                     await _display.put(f"\033[36m{frm}\033[0m \033[2m{_ts()}\033[0m  [file: {frame.get('name','')} ({frame.get('size',0)}B)]")
                 elif t == "reaction":

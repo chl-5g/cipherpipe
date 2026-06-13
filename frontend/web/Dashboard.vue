@@ -217,6 +217,11 @@ createApp({
           addMsg('system', msg.msg, 'in');
           return;
         }
+        if (msg.type === 'read_receipt') {
+          const m = messages.value.find(x => x.id === msg.event_id);
+          if (m) m.read = true;
+          return;
+        }
         if (msg.type === 'reaction') {
           const m = messages.value.find(x => x.id === msg.event_id);
           if (m) m.reactions = (m.reactions || '') + msg.emoji;
@@ -232,7 +237,11 @@ createApp({
             }
             return;
           }
-          addMsg(msg.from, msg.text, 'in', msg.id);
+          const sender = (msg.from || '').slice(0, 12);
+          addMsg(sender, msg.text, 'in', msg.id);
+          if (msg.id && document.visibilityState === 'visible') {
+            ws.value.send(JSON.stringify({type:'read_receipt', event_id: msg.id, peer: msg.from}));
+          }
           if (document.hidden && Notification.permission === 'granted') {
             new Notification('CipherPipe: ' + msg.from, {body: msg.text.slice(0, 100)});
           }
@@ -261,7 +270,7 @@ createApp({
     }
 
     function addMsg(from, text, dir, eventId, prepend = false, delivered = false) {
-      const m = { id: eventId || 'm' + (++msgId), from, text, dir, delivered, reactions: '', hover: false };
+      const m = { id: eventId || 'm' + (++msgId), from, text, dir, delivered, read: false, reactions: '', hover: false };
       if (prepend) messages.value.unshift(m);
       else messages.value.push(m);
       nextTick(() => {
@@ -351,7 +360,22 @@ createApp({
       ws.value.send(JSON.stringify({type:'search', query: searchQuery.value}));
     }
 
-    onMounted(() => { connect(); });
+    onMounted(() => {
+      connect();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          // Send read receipts for all un-read incoming messages
+          for (const m of messages.value) {
+            if (m.dir === 'in' && m.id && !m.read) {
+              m.read = true;
+              if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+                ws.value.send(JSON.stringify({type:'read_receipt', event_id: m.id, peer: m.from}));
+              }
+            }
+          }
+        }
+      });
+    });
 
     return {
       currentPeer, myPubkey, peers, messages, inputText, searchQuery, statusText, statusClass,

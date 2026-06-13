@@ -1,0 +1,7 @@
+*.db
+*.key
+nostr.key
+__pycache__/
+logs/
+archive/
+cipherpipe.db*

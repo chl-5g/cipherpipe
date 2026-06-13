@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CipherPipe</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0d1117; color:#c9d1d9; font:14px/1.5 SF Mono,Menlo,Monaco,monospace; display:flex; height:100vh; }
+.sidebar { width:260px; background:#161b22; border-right:1px solid #30363d; display:flex; flex-direction:column; }
+.sidebar-header { padding:16px; border-bottom:1px solid #30363d; font-size:18px; font-weight:bold; color:#58a6ff; }
+.peer-list { flex:1; overflow-y:auto; padding:8px; }
+.peer-item { padding:10px 12px; border-radius:6px; cursor:pointer; margin-bottom:2px; display:flex; justify-content:space-between; align-items:center; }
+.peer-item:hover { background:#1c2128; }
+.peer-item.active { background:#1f6feb22; border:1px solid #1f6feb; }
+.peer-id { font-weight:bold; font-size:12px; }
+.peer-dot { width:8px; height:8px; border-radius:50%; background:#3fb950; }
+.btn-add { margin:8px; padding:8px; background:#238636; border:none; color:#fff; border-radius:6px; cursor:pointer; font-family:inherit; font-size:12px; }
+.main { flex:1; display:flex; flex-direction:column; }
+.header { padding:12px 16px; border-bottom:1px solid #30363d; background:#161b22; display:flex; justify-content:space-between; align-items:center; }
+.header .title { font-weight:bold; }
+.header .status { font-size:12px; color:#3fb950; }
+.header .status.off { color:#f85149; }
+.msg-area { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:6px; }
+.msg { max-width:75%; padding:8px 12px; border-radius:8px; font-size:13px; animation: fadeIn 0.2s; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+.msg.in { align-self:flex-start; background:#1c2128; border:1px solid #30363d; }
+.msg.out { align-self:flex-end; background:#1f6feb22; border:1px solid #1f6feb; }
+.msg .meta { font-size:10px; color:#8b949e; margin-bottom:2px; }
+.msg .text { word-break:break-word; white-space:pre-wrap; }
+.input-bar { padding:12px 16px; border-top:1px solid #30363d; background:#161b22; display:flex; gap:8px; }
+.input-bar input { flex:1; padding:8px 12px; border-radius:6px; border:1px solid #30363d; background:#0d1117; color:#c9d1d9; font-family:inherit; font-size:13px; }
+.input-bar input:focus { outline:none; border-color:#58a6ff; }
+.input-bar button { padding:8px 16px; border-radius:6px; border:none; background:#1f6feb; color:#fff; cursor:pointer; font-family:inherit; font-size:13px; }
+.input-bar button:hover { background:#388bfd; }
+#pubkey-display { font-size:10px; color:#8b949e; padding:8px 16px; background:#0d1117; border-top:1px solid #30363d; word-break:break-all; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">CipherPipe <span>Nostr</span></div>
+  <div class="peer-list" id="peerList">
+    <div style="padding:12px;color:#8b949e;font-size:12px;">Add a peer to start</div>
+  </div>
+  <button class="btn-add" onclick="addPeer()">+ Add Peer</button>
+</div>
+
+<div class="main">
+  <div class="header">
+    <span class="title" id="chatTitle">Select a peer</span>
+    <span class="status off" id="status">disconnected</span>
+  </div>
+  <div class="msg-area" id="msgArea">
+    <div style="color:#8b949e;text-align:center;margin-top:40px;">
+      Add a peer pubkey to start chatting.<br>
+      <small>Everything is NIP-44 end-to-end encrypted via Nostr relays.</small>
+    </div>
+  </div>
+  <div class="input-bar">
+    <input type="text" id="msgInput" placeholder="Message..." disabled onkeydown="if(event.key==='Enter')send()">
+    <button onclick="send()" id="sendBtn" disabled>Send</button>
+  </div>
+  <div id="pubkey-display"></div>
+</div>
+
+<script>
+let ws = null, currentPeer = null;
+const peers = JSON.parse(localStorage.getItem('cp_peers') || '[]');
+
+function connect() {
+  if (ws) ws.close();
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('status').textContent = 'connected';
+    document.getElementById('status').className = 'status';
+  };
+
+  ws.onclose = () => {
+    document.getElementById('status').textContent = 'disconnected';
+    document.getElementById('status').className = 'status off';
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'identity') {
+      document.getElementById('pubkey-display').textContent = 'You: ' + msg.pubkey;
+      return;
+    }
+    if (msg.type === 'msg') {
+      addMessage(msg.from, msg.text, 'in');
+    }
+  };
+}
+
+function addPeer() {
+  const pubkey = prompt('Enter peer pubkey (hex):');
+  if (!pubkey) return;
+  if (!peers.includes(pubkey)) {
+    peers.push(pubkey);
+    localStorage.setItem('cp_peers', JSON.stringify(peers));
+    renderPeers();
+  }
+  switchPeer(pubkey);
+}
+
+function switchPeer(pubkey) {
+  currentPeer = pubkey;
+  document.getElementById('chatTitle').textContent = `Chat with ${pubkey.slice(0,12)}...`;
+  document.getElementById('msgInput').disabled = false;
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('msgArea').innerHTML = '';
+  renderPeers();
+}
+
+function send() {
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN || !currentPeer) return;
+  addMessage('me', text, 'out');
+  ws.send(JSON.stringify({type:'msg', text:text, to:currentPeer}));
+  input.value = '';
+  input.focus();
+}
+
+function addMessage(from, text, cls) {
+  const div = document.createElement('div');
+  div.className = `msg ${cls}`;
+  div.innerHTML = `<div class="meta">${from} 🔒</div><div class="text">${text}</div>`;
+  document.getElementById('msgArea').appendChild(div);
+  div.scrollIntoView({behavior:'smooth'});
+}
+
+function renderPeers() {
+  const list = document.getElementById('peerList');
+  if (peers.length === 0) {
+    list.innerHTML = '<div style="padding:12px;color:#8b949e;font-size:12px;">Add a peer to start</div>';
+    return;
+  }
+  list.innerHTML = peers.map(p => `<div class="peer-item${p===currentPeer?' active':''}" onclick="switchPeer('${p}')">
+    <span class="peer-id">${p.slice(0,12)}...</span>
+    <span class="peer-dot"></span>
+  </div>`).join('');
+}
+
+connect();
+renderPeers();
+</script>
+</body>
+</html>

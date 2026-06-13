@@ -2,8 +2,8 @@
 """Load .env into os.environ, provide typed config access."""
 import os
 
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(os.path.dirname(SRC_DIR))
+PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_DIR = os.path.dirname(PACKAGE_DIR)
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
 
 _ENV_PATH = os.path.join(PROJECT_DIR, ".env")
@@ -21,3 +21,4 @@ if not RELAYS:
     RELAYS = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"]
 KEY_FILE = os.path.join(DATA_DIR, os.environ.get("CP_KEY_FILE", "nostr.key"))
 RELAY_CONFIG = os.path.expanduser(os.environ.get("CP_RELAY_CONFIG", os.path.join(DATA_DIR, "relays.json")))
+FILE_MAX_SIZE = int(os.environ.get("CP_FILE_MAX_SIZE", str(100 * 1024 * 1024)))

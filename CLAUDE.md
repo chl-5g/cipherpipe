@@ -1,66 +1,58 @@
 # CipherPipe
 
-端到端加密数据传输管道，基于 Nostr 协议。本机 `~/cipherpipe/`（仅 Mac）。
+端到端加密数据传输管道，基于 Nostr 协议。
+
+## 架构
+
+```
+client ──WS──→ Hub (proxy) ──┬── LAN peer
+                              └── Nostr relay
+```
+
+- **Hub** 是唯一中间层，处理所有消息路由、持久化、送达确认
+- **Client** 是 thin client，只做 I/O——发消息、显示消息
+- **没有服务器**，只有管道
 
 ## 项目结构
 
 ```
 cipherpipe/
-├── run.sh                  # 启动 proxy
-├── .env                    # 环境变量
-├── requirements.txt
-├── src/
-│   └── cipherpipe/         # Python 包
-│       ├── proxy.py        # Nostr 桥 + 浏览器入口
-│       ├── agent.py        # agent 客户端（LAN peer）
-│       ├── cli.py          # CLI 人类客户端
-│       ├── config.py       # 统一配置加载
-│       ├── nostr_crypto.py # NIP-44 加解密 + 签名
-│       ├── storage.py      # SQLite 持久化
-│       ├── relay_manager.py
-│       ├── file_handler.py # 文件分片收发
-│       ├── lan_discovery.py
-│       └── dashboard.html  # 浏览器 UI
-├── data/                   # 运行时数据
-│   ├── nostr.key           # proxy 身份私钥
-│   ├── claude.key          # agent 身份私钥
-│   ├── cipherpipe.db       # 消息/联系人存储
-│   ├── inbox.jsonl         # agent 收件箱
-│   ├── outbox.jsonl        # agent 发件箱
-│   └── downloads/          # 接收的文件
-├── logs/                   # proxy 日志（JSONL）
-└── archive/                # 旧版文件
+├── backend/
+│   ├── hub/          proxy.py (入口) + router.py (PeerRouter)
+│   ├── core/         config.py + crypto.py + store.py
+│   ├── network/      relay.py + lan.py
+│   ├── file/         transfer.py
+│   └── agent.py      对端 agent
+├── frontend/
+│   ├── web/          Dashboard.vue (浏览器)
+│   └── cli/          cli.py (终端)
+├── run.sh            # 启动 Hub
+├── cipherchat        # 终端聊天快捷入口
+├── data/             # 运行时数据
+└── logs/
 ```
 
 ## 原则
 
-- **零硬编码**：端口、relay 地址、文件路径全部从 `.env` 读取，由 `config.py` 统一加载
-- **CipherPipe 只管管道**：加密传输、路由转发。不调 LLM API、不持 API key
-- **单端口**：8700（可配）同时承载 HTTP/WS/LAN peer/文件传输
-- **无 print**：所有输出走 structlog
+- **客户端只做 I/O**：消息收发和显示，不做路由/加密/状态管理
+- **Hub 处理一切**：路由、持久化、送达确认、消息状态
+- **零硬编码**：配置从 `.env` → config.py 统一加载
+- **单端口**：8700 承载 HTTP/WS/LAN peer/文件传输
+- **TDD**：先写测试 → 看测试失败 → 写代码 → 看测试通过。不通过测试验证不做任何实现
 
 ## 启动
 
 ```bash
-bash run.sh                                    # 启动 proxy
-python3 src/cipherpipe/agent.py --keyfile data/claude.key  # 启动 agent
+bash run.sh                                         # 启动 Hub
+PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key  # 启动 agent
 ```
 
-`run.sh` 自动 kill 旧进程后启动。agent 需单独起。
+## 消息协议
 
-## 文件传输
+客户端 → Hub: `{type:'msg', text, to}` / `{type:'file', path, to}`
+Hub → 客户端: `{type:'msg', id, from, text, delivered}`
 
-浏览器发文件走分片上传（每片 256KB）：
-`file_start` → N×`file_chunk` → `file_end`
-proxy 拼装 → 转发分片给 peer → peer 拼装落盘到 `data/downloads/`
-
-## agent 回复模式
-
-| mode | 行为 |
-|------|------|
-| `none` | 默认，仅写 inbox.jsonl |
-| `echo` | 自动回复 `[echo] <原文>` |
-| `cmd:<命令>` | 消息 stdin 传入命令，stdout 作为回复 |
+所有中间逻辑（已读、送达、reaction、typing）由 Hub 统一处理。
 
 ## 依赖
 

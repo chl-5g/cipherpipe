@@ -113,7 +113,7 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
         </div>
         <div class="meta">
           <span>{{ m.dir === 'out' ? 'me' : m.from }} 🔒</span>
-          <span v-if="m.dir==='out'" :style="{color: m.read ? '#58a6ff' : '#8b949e', fontSize:'10px'}">{{ m.read ? '✓✓' : '✓' }}</span>
+          <span v-if="m.dir==='out'" :style="{color: m.delivered ? '#58a6ff' : '#8b949e', fontSize:'10px'}">{{ m.delivered ? '✓✓' : '✓' }}</span>
         </div>
         <div class="body">{{ m.text }}</div>
         <div v-if="m.reactions" class="rx">{{ m.reactions }}</div>
@@ -185,9 +185,17 @@ createApp({
           typingTimeout = setTimeout(() => { typingText.value = ''; }, 3000);
           return;
         }
-        if (msg.type === 'read_receipt') {
-          const m = messages.value.find(x => x.id === msg.event_id);
-          if (m) m.read = true;
+        if (msg.type === 'file') {
+          addMsg(msg.from, `[file: ${msg.name} (${(msg.size/1024).toFixed(1)}KB)]`, 'in', msg.id);
+          return;
+        }
+        if (msg.type === 'file_ok') {
+          const lastOut = [...messages.value].reverse().find(x => x.dir === 'out' && !x.delivered);
+          if (lastOut) { lastOut.id = msg.name; lastOut.delivered = true; }
+          return;
+        }
+        if (msg.type === 'error') {
+          addMsg('system', msg.msg, 'in');
           return;
         }
         if (msg.type === 'reaction') {
@@ -196,23 +204,18 @@ createApp({
           return;
         }
         if (msg.type === 'msg' || msg.from) {
-          if (msg.from === 'me') return;
-          let text = msg.text;
-          let t;
-          try { t = JSON.parse(msg.text); } catch(e) {}
-          if (t && t.type === 'file_offer') {
-            const ok = confirm(`收到文件: ${t.name} (${(t.size/1024).toFixed(1)}KB)。接受？`);
-            if (ok) {
-              ws.value.send(JSON.stringify({type:'file_accept', file_id:t.file_id, token:t.token}));
-              text = `[已接收: ${t.name}]`;
-            } else { return; }
+          if (msg.from === 'me') {
+            // Echo from proxy — update last outgoing with real id and delivered status
+            const lastOut = [...messages.value].reverse().find(x => x.dir === 'out' && !x.id);
+            if (lastOut) {
+              lastOut.id = msg.id || lastOut.id;
+              lastOut.delivered = msg.delivered;
+            }
+            return;
           }
-          addMsg(msg.from, text, 'in', msg.event_id);
-          // Read receipt
-          if (msg.event_id) ws.value.send(JSON.stringify({type:'read_receipt', event_id: msg.event_id, peer: msg.from}));
-          // Notification
+          addMsg(msg.from, msg.text, 'in', msg.id);
           if (document.hidden && Notification.permission === 'granted') {
-            new Notification('CipherPipe: ' + msg.from, {body: text.slice(0, 100)});
+            new Notification('CipherPipe: ' + msg.from, {body: msg.text.slice(0, 100)});
           }
         }
         if (msg.type === 'search_results') {
@@ -226,15 +229,15 @@ createApp({
         if (msg.type === 'history') {
           if (msg.data) {
             for (const m of msg.data) {
-              addMsg(m.pubkey.slice(0,12), m.content, m.direction, m.event_id, true);
+              addMsg(m.pubkey.slice(0,12), m.content, m.direction, m.event_id, true, m.delivered);
             }
           }
         }
       };
     }
 
-    function addMsg(from, text, dir, eventId, prepend = false) {
-      const m = { id: eventId || 'm' + (++msgId), from, text, dir, read: false, reactions: '', hover: false };
+    function addMsg(from, text, dir, eventId, prepend = false, delivered = false) {
+      const m = { id: eventId || 'm' + (++msgId), from, text, dir, delivered, reactions: '', hover: false };
       if (prepend) messages.value.unshift(m);
       else messages.value.push(m);
       nextTick(() => {
@@ -245,8 +248,7 @@ createApp({
     function send() {
       const text = inputText.value.trim();
       if (!text || !ws.value || ws.value.readyState !== WebSocket.OPEN || !currentPeer.value) return;
-      const eid = 'out_' + Date.now();
-      addMsg('me', text, 'out', eid);
+      addMsg('me', text, 'out');
       ws.value.send(JSON.stringify({type:'msg', text, to: currentPeer.value}));
       inputText.value = '';
     }
@@ -257,19 +259,9 @@ createApp({
       inp.onchange = async () => {
         const file = inp.files[0];
         if (!file || !currentPeer.value) return;
-        const CHUNK_SIZE = 256 * 1024;
-        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-        ws.value.send(JSON.stringify({type:'file_start', name:file.name, size:file.size, total_chunks: totalChunks, to: currentPeer.value}));
-        for (let i = 0; i < totalChunks; i++) {
-          const blob = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-          const b64 = await new Promise(resolve => {
-            const r = new FileReader();
-            r.onload = () => resolve(r.result.split(',')[1]);
-            r.readAsDataURL(blob);
-          });
-          ws.value.send(JSON.stringify({type:'file_chunk', index: i, total: totalChunks, data: b64}));
-        }
-        ws.value.send(JSON.stringify({type:'file_end', name:file.name}));
+        const buf = await file.arrayBuffer();
+        ws.value.send(JSON.stringify({type:'file', name:file.name, size:buf.byteLength, to: currentPeer.value}));
+        ws.value.send(buf);
         addMsg('me', `[文件: ${file.name} (${(file.size/1024).toFixed(1)}KB)]`, 'out');
       };
       inp.click();

@@ -3,8 +3,6 @@
 import asyncio, json, logging, os, sys, time, hashlib, base64, socket, uuid
 from datetime import datetime
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 import structlog
 import coincurve
 import websockets
@@ -12,11 +10,11 @@ from websockets.asyncio.server import serve
 from websockets.http11 import Response as HTTPResponse
 from websockets.datastructures import Headers
 
-from cipherpipe.nostr_crypto import load_or_create_key, sign_event, verify_event, nip44_encrypt, nip44_decrypt
-from cipherpipe.storage import init_db, add_message, get_messages, search_messages, upsert_contact, list_contacts, delete_contact, get_state, set_state
-from cipherpipe.relay_manager import load_relays, select_best_relays
-from cipherpipe.config import PORT, RELAYS as DEFAULT_RELAYS, KEY_FILE, PROJECT_DIR, SRC_DIR
-from cipherpipe.file_handler import FileReceiver, make_file_offer, ACTIVE_TOKENS, DOWNLOAD_DIR
+from backend.core.crypto import load_or_create_key, sign_event, verify_event, nip44_encrypt, nip44_decrypt
+from backend.core.store import init_db, add_message, get_messages, search_messages, upsert_contact, list_contacts, delete_contact, get_state, set_state, mark_delivered
+from backend.network.relay import load_relays, select_best_relays
+from backend.core.config import PORT, RELAYS as DEFAULT_RELAYS, KEY_FILE, PROJECT_DIR, FILE_MAX_SIZE
+from backend.file.transfer import FileReceiver, make_file_offer, ACTIVE_TOKENS, DOWNLOAD_DIR, forward_file
 
 LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -132,8 +130,28 @@ async def ws_handler(websocket):
     # Handle file upload via same WS (token-verified chunks)
     uploading_file = {"token": None, "chunks": [], "token_info": None}
     browser_file = {"active": False, "name": "", "chunks": [], "peer": ""}
+    pending_file = None  # {name, size, to} — waiting for binary body
     try:
         async for raw in websocket:
+            # Binary frame = file body
+            if isinstance(raw, bytes):
+                if pending_file:
+                    try:
+                        pf = pending_file
+                        save_path = os.path.join(DOWNLOAD_DIR, pf["name"])
+                        with open(save_path, "wb") as f: f.write(raw)
+                        logger.info("File received via binary", name=pf["name"], size=len(raw))
+                        await websocket.send(json.dumps({"type":"file_ok","name":pf["name"],"size":len(raw)}))
+                        peer = pf.get("to", "")
+                        if peer:
+                            route = await forward_file(save_path, peer, LAN_CLIENTS, SK, nostr_publish)
+                            add_message(f"file_{int(time.time()*1000)}", peer, pf["name"], "out", msg_type="file", delivered=1 if route=="lan" else 0)
+                    except Exception as e:
+                        logger.error("File upload failed", error=str(e))
+                        await websocket.send(json.dumps({"type":"error","msg":str(e)}))
+                    pending_file = None
+                continue
+
             try: frame = json.loads(raw)
             except json.JSONDecodeError: continue
             t = frame.get("type", "")
@@ -151,18 +169,41 @@ async def ws_handler(websocket):
             # ── LAN peer → browser relay ──
             if t == "msg" and not is_browser:
                 target = frame.get("to", "")
+                text = frame.get("text", "")
+                eid = f"lan_{int(time.time()*1000)}"
                 if target in LAN_CLIENTS:
-                    out = json.dumps({"type": "msg", "from": peer_pubkey[:12], "text": frame.get("text","")})
+                    out = json.dumps({"type": "msg", "id": eid, "from": peer_pubkey[:12], "text": text, "delivered": True})
                     await LAN_CLIENTS[target].send(out)
+                    # Echo back to sender
+                    await websocket.send(json.dumps({"type": "msg", "id": eid, "from": "me", "text": text, "delivered": True}))
+                    add_message(eid, target, text, "in", delivered=1)
                 elif target == PUBKEY:
-                    # LAN peer sending to proxy itself — push to browsers
-                    out = json.dumps({"type": "msg", "from": peer_pubkey[:12], "text": frame.get("text","")})
+                    out = json.dumps({"type": "msg", "id": eid, "from": peer_pubkey[:12], "text": text, "delivered": True})
                     for bw in list(BROWSERS):
                         try: await bw.send(out)
                         except Exception: BROWSERS.discard(bw)
+                    add_message(eid, peer_pubkey, text, "in", delivered=1)
                 continue
 
-            # ── Browser file upload: chunked (no max_size limit) ──
+            # ── Unified file: JSON header → binary body ──
+            if t == "file":
+                size = frame.get("size", 0)
+                if size > FILE_MAX_SIZE:
+                    await websocket.send(json.dumps({"type":"error","msg":f"文件过大 ({size} > {FILE_MAX_SIZE})"}))
+                else:
+                    pending_file = {"name": frame.get("name",""), "size": size, "to": frame.get("to","")}
+                continue
+
+            # ── LAN peer file send via path (CLI compat) ──
+            if t == "file_path" and not is_browser:
+                filepath = frame.get("path", "")
+                target = frame.get("to", "")
+                if filepath and target and os.path.isfile(filepath):
+                    route = await forward_file(filepath, target, LAN_CLIENTS, SK, nostr_publish)
+                    add_message(f"file_{int(time.time()*1000)}", target, os.path.basename(filepath), "out", msg_type="file", delivered=1 if route == "lan" else 0)
+                continue
+
+            # ── Browser file upload: chunked (legacy) ──
             if t == "file_start":
                 browser_file = {"active": True, "name": frame.get("name",""),
                                 "chunks": [], "peer": frame.get("to",""),
@@ -183,21 +224,10 @@ async def ws_handler(websocket):
                 logger.info("File received (chunked)", name=bf["name"], size=len(file_data), chunks=len(bf["chunks"]))
                 log_event("file_received", name=bf["name"], size=len(file_data))
                 await websocket.send(json.dumps({"type":"file_ok","name":bf["name"],"size":len(file_data)}))
-                # Forward file chunks to peer
+                add_message(f"file_{int(time.time()*1000)}", bf.get("peer",""), bf["name"], "out", msg_type="file")
                 peer = bf["peer"]
-                if peer and peer in LAN_CLIENTS:
-                    CHUNK = 256 * 1024
-                    total = max((len(file_data) + CHUNK - 1) // CHUNK, 1)
-                    await LAN_CLIENTS[peer].send(json.dumps({"type":"file_start","name":bf["name"],"size":len(file_data),"total_chunks":total}))
-                    for i in range(total):
-                        chunk = file_data[i*CHUNK:(i+1)*CHUNK]
-                        await LAN_CLIENTS[peer].send(json.dumps({"type":"file_chunk","index":i,"total":total,"name":bf["name"],"data":base64.b64encode(chunk).decode()}))
-                    await LAN_CLIENTS[peer].send(json.dumps({"type":"file_end","name":bf["name"]}))
-                    log_event("file_forwarded_lan", to=peer[:12], name=bf["name"], size=len(file_data))
-                elif peer:
-                    from cipherpipe.file_handler import send_file_chunked
-                    await send_file_chunked(SK, peer, save_path, nostr_publish)
-                    log_event("file_forwarded_nostr", to=peer[:12], name=bf["name"], size=len(file_data))
+                if peer:
+                    await forward_file(save_path, peer, LAN_CLIENTS, SK, nostr_publish)
                 browser_file = {"active": False, "name": "", "chunks": [], "peer": ""}
                 continue
 
@@ -239,15 +269,18 @@ async def ws_handler(websocket):
                 if not text or not peer: continue
                 # Route: LAN first, then Nostr
                 if peer in LAN_CLIENTS:
-                    out = json.dumps({"type": "msg", "from": "me", "text": text})
+                    eid = f"lan_{int(time.time()*1000)}"
+                    out = json.dumps({"type": "msg", "id": eid, "from": "me", "text": text, "delivered": True})
                     await LAN_CLIENTS[peer].send(out)
                     await websocket.send(out)
+                    add_message(eid, peer, text, "out", delivered=1)
                     log_event("msg_sent_lan", to=peer[:12])
                     continue
                 encrypted = nip44_encrypt(SK, peer, text)
                 event = sign_event(SK, 4, encrypted, [["p", peer]])
                 await nostr_publish(event)
-                await websocket.send(json.dumps({"type": "msg", "from": "me", "text": text, "event_id": event["id"]}))
+                await websocket.send(json.dumps({"type": "msg", "id": event["id"], "from": "me", "text": text, "delivered": False}))
+                add_message(event["id"], peer, text, "out")
                 add_message(event["id"], peer, text, "out")
                 log_event("msg_sent", to=peer[:12])
             elif t == "file_send":
@@ -281,14 +314,21 @@ async def ws_handler(websocket):
             elif t == "typing":
                 peer = frame.get("to", "")
                 if peer:
-                    encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "typing"}))
-                    await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer]]))
+                    out = json.dumps({"type": "typing", "from": PUBKEY[:12]})
+                    if peer in LAN_CLIENTS:
+                        await LAN_CLIENTS[peer].send(out)
+                    else:
+                        encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "typing"}))
+                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer]]))
             elif t == "read_receipt":
                 peer, eid = frame.get("peer", ""), frame.get("event_id", "")
                 if peer and eid:
-                    receipt = json.dumps({"type": "read_receipt", "event_id": eid, "read_at": int(time.time())})
-                    encrypted = nip44_encrypt(SK, peer, receipt)
-                    await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer]]))
+                    out = json.dumps({"type": "read_receipt", "event_id": eid})
+                    if peer in LAN_CLIENTS:
+                        await LAN_CLIENTS[peer].send(out)
+                    else:
+                        encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "read_receipt", "event_id": eid, "read_at": int(time.time())}))
+                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer]]))
             elif t == "reaction":
                 peer, eid, emoji = frame.get("peer",""), frame.get("event_id",""), frame.get("emoji","")
                 if peer and eid and emoji:
@@ -298,6 +338,8 @@ async def ws_handler(websocket):
                     else:
                         encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "reaction", "event_id": eid, "emoji": emoji}))
                         await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer], ["e", eid]]))
+                    # Persist with dedup via unique event_id
+                    add_message(f"rxn_{PUBKEY[:12]}_{eid}_{emoji}", peer, emoji, "out", msg_type="reaction")
             elif t == "contacts":
                 await websocket.send(json.dumps({"type": "contacts", "data": list_contacts()}))
             elif t == "delete_contact":
@@ -345,7 +387,7 @@ async def queue_to_browsers():
 async def process_request(c, r):
     if r.path == "/" and r.headers.get("Upgrade","").lower() != "websocket":
         try:
-            with open(os.path.join(SRC_DIR, "dashboard.html"), "rb") as f:
+            with open(os.path.join(PROJECT_DIR, "frontend", "web", "Dashboard.vue"), "rb") as f:
                 return HTTPResponse(200, "OK", Headers({"Content-Type":"text/html; charset=utf-8"}), f.read())
         except FileNotFoundError:
             return HTTPResponse(404, "Not Found", Headers({}), b"Not found")
@@ -368,7 +410,7 @@ async def main():
     await start_relay_pool(SK)
     asyncio.create_task(queue_to_browsers())
 
-    async with serve(ws_handler, "0.0.0.0", PORT, process_request=process_request):
+    async with serve(ws_handler, "0.0.0.0", PORT, process_request=process_request, max_size=FILE_MAX_SIZE):
         await asyncio.Future()
 
 async def _publish_profile(url, event):

@@ -3,7 +3,7 @@
 import asyncio, json, os, time, structlog
 import websockets
 
-from config import RELAYS as DEFAULT_RELAYS, RELAY_CONFIG
+from backend.core.config import RELAYS as DEFAULT_RELAYS, RELAY_CONFIG
 
 logger = structlog.get_logger("cipherpipe.relay")
 

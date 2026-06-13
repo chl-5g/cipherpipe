@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import hashes as crypto_hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
 
-from config import KEY_FILE as _DEFAULT_KEYFILE
+from backend.core.config import KEY_FILE as _DEFAULT_KEYFILE
 
 def load_or_create_key(keyfile=None):
     if keyfile is None:

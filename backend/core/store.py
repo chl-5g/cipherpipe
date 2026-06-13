@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SQLite persistence for messages, contacts, and state."""
 import sqlite3, os, time
-from cipherpipe.config import DATA_DIR
+from backend.core.config import DATA_DIR
 
 DB_PATH = os.path.join(DATA_DIR, "cipherpipe.db")
 
@@ -35,7 +35,9 @@ def init_db():
             msg_type TEXT DEFAULT 'text',
             direction TEXT CHECK(direction IN ('in','out')) NOT NULL,
             created_at INTEGER NOT NULL,
-            received_at INTEGER
+            received_at INTEGER,
+            delivered INTEGER DEFAULT 0,
+            read_status INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_messages_pubkey ON messages(pubkey);
         CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
@@ -45,18 +47,35 @@ def init_db():
             value TEXT
         );
     """)
+    for col, typ in [("delivered", "INTEGER DEFAULT 0"), ("read_status", "INTEGER DEFAULT 0")]:
+        try: db.execute(f"ALTER TABLE messages ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError: pass
     db.commit()
     db.close()
 
 
-def add_message(event_id, pubkey, content, direction, msg_type="text", created_at=None, received_at=None):
+def add_message(event_id, pubkey, content, direction, msg_type="text", created_at=None, received_at=None, delivered=0):
     db = get_db()
     db.execute(
-        "INSERT OR IGNORE INTO messages(event_id, pubkey, content, msg_type, direction, created_at, received_at) VALUES(?,?,?,?,?,?,?)",
-        (event_id, pubkey, content, msg_type, direction, created_at or int(time.time()), received_at or int(time.time()))
+        "INSERT OR IGNORE INTO messages(event_id, pubkey, content, msg_type, direction, created_at, received_at, delivered) VALUES(?,?,?,?,?,?,?,?)",
+        (event_id, pubkey, content, msg_type, direction, created_at or int(time.time()), received_at or int(time.time()), delivered)
     )
     row_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
     db.execute("INSERT INTO messages_fts(rowid, pubkey, content) VALUES(?,?,?)", (row_id, pubkey[:12], content))
+    db.commit()
+    db.close()
+
+
+def mark_delivered(event_id):
+    db = get_db()
+    db.execute("UPDATE messages SET delivered=1 WHERE event_id=?", (event_id,))
+    db.commit()
+    db.close()
+
+
+def mark_read(event_id):
+    db = get_db()
+    db.execute("UPDATE messages SET read_status=1 WHERE event_id=?", (event_id,))
     db.commit()
     db.close()
 

@@ -1,0 +1,63 @@
+#!/bin/bash
+# CipherPipe — 终端聊天客户端
+cd "$(dirname "$0")"
+export PYTHONPATH="$(dirname "$0"):$PYTHONPATH"
+
+clear_screen() { printf "\033[2J\033[H"; }
+
+show_banner() {
+    clear_screen
+    printf "\033[36m"
+    printf "   ╔══════════════════════════════════╗\n"
+    printf "   ║         CipherPipe              ║\n"
+    printf "   ║   end-to-end encrypted pipe     ║\n"
+    printf "   ╚══════════════════════════════════╝\n"
+    printf "\033[0m\n"
+}
+
+usage() {
+    show_banner
+    echo "用法:"
+    echo "  ./cipherchat <对方公钥>    直接连接"
+    echo "  ./cipherchat               交互式连接"
+    echo "  ./cipherchat -h            帮助"
+    echo ""
+    echo "聊天命令:"
+    echo "  /send <路径>   发送文件"
+    echo "  /quit          退出"
+    exit 0
+}
+
+case "${1}" in
+    -h|--help) usage ;;
+esac
+
+PEER="${1}"
+
+validate_pubkey() {
+    local pk="$1"
+    [[ "$pk" =~ ^[0-9a-fA-F]{64}$ ]] && return 0
+    [[ "$pk" =~ ^(02|03)[0-9a-fA-F]{64}$ ]] && return 0
+    return 1
+}
+
+if [ -z "$PEER" ]; then
+    show_banner
+    while true; do
+        printf "\033[35m输入对方公钥:\033[0m "
+        read -r PEER
+        if [ -z "$PEER" ]; then
+            echo "未输入公钥，退出。"
+            exit 1
+        fi
+        if validate_pubkey "$PEER"; then
+            break
+        fi
+        printf "\033[31m公钥格式错误（64位hex），请重新输入\033[0m\n"
+    done
+elif ! validate_pubkey "$PEER"; then
+    echo "公钥格式错误（64位hex）"
+    exit 1
+fi
+
+python3 frontend/cli/cli.py --keyfile data/cli.key --connect-lan localhost --peer "$PEER"

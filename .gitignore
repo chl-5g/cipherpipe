@@ -6,4 +6,5 @@ data/outbox.jsonl
 logs/
 .env
 data/downloads/
+src/data/
 .DS_Store

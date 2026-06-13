@@ -2,12 +2,10 @@
 """CipherPipe agent — WebSocket peer with optional auto-reply."""
 import asyncio, json, os, sys, time, subprocess, base64
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 import structlog
 import websockets
-from cipherpipe.config import PORT, KEY_FILE as DEFAULT_KEYFILE, PROJECT_DIR
-from cipherpipe.nostr_crypto import load_or_create_key
+from backend.core.config import PORT, KEY_FILE as DEFAULT_KEYFILE, PROJECT_DIR
+from backend.core.crypto import load_or_create_key
 
 structlog.configure(
     processors=[structlog.stdlib.add_log_level, structlog.processors.TimeStamper(fmt="iso"), structlog.dev.ConsoleRenderer()],

@@ -2,7 +2,7 @@
 """mDNS LAN peer discovery for CipherPipe."""
 import asyncio, json, socket, time, structlog, uuid
 from zeroconf import ServiceBrowser, ServiceInfo, Zeroconf
-from config import PORT
+from backend.core.config import PORT
 
 SERVICE_TYPE = "_cipherpipe._tcp.local."
 logger = structlog.get_logger("cipherpipe.lan")

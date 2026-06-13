@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """File transfer — Nostr signal + chunked DM. LAN direct file chunks go over main WS."""
 import asyncio, json, os, uuid, hashlib, base64, structlog
-from cipherpipe.nostr_crypto import nip44_encrypt, sign_event
-from cipherpipe.config import DATA_DIR
+from backend.core.crypto import nip44_encrypt, sign_event
+from backend.core.config import DATA_DIR
 
 logger = structlog.get_logger("cipherpipe.file")
 NOSTR_CHUNK_SIZE = 32 * 1024
@@ -46,6 +46,30 @@ async def send_file_chunked(sk, peer_pubkey, filepath, publish_fn):
         await publish_fn(sign_event(sk, 4, encrypted, [["p", peer_pubkey]]))
         await asyncio.sleep(0.05)
     logger.info("File sent via Nostr chunks", name=os.path.basename(filepath), chunks=total)
+
+
+async def forward_file(filepath, peer_pubkey, lan_clients, sk, publish_fn, data_dir=DOWNLOAD_DIR):
+    """Read file, chunk-forward to peer via LAN or Nostr relay."""
+    import base64 as b64
+    with open(filepath, "rb") as f:
+        data = f.read()
+    name = os.path.basename(filepath)
+    CHUNK = 256 * 1024
+    total = max((len(data) + CHUNK - 1) // CHUNK, 1)
+    if peer_pubkey in lan_clients:
+        ws = lan_clients[peer_pubkey]
+        await ws.send(json.dumps({"type": "file_start", "name": name, "size": len(data), "total_chunks": total}))
+        for i in range(total):
+            chunk = data[i*CHUNK:(i+1)*CHUNK]
+            await ws.send(json.dumps({"type": "file_chunk", "index": i, "total": total, "name": name, "data": b64.b64encode(chunk).decode()}))
+        await ws.send(json.dumps({"type": "file_end", "name": name}))
+        return "lan"
+    else:
+        save_path = os.path.join(data_dir, name)
+        with open(save_path, "wb") as f:
+            f.write(data)
+        await send_file_chunked(sk, peer_pubkey, save_path, publish_fn)
+        return "relay"
 
 
 class FileReceiver:

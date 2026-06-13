@@ -130,26 +130,16 @@ async def ws_handler(websocket):
     # Handle file upload via same WS (token-verified chunks)
     uploading_file = {"token": None, "chunks": [], "token_info": None}
     browser_file = {"active": False, "name": "", "chunks": [], "peer": ""}
-    pending_file = None  # {name, size, to} — waiting for binary body
+    pending_file = None  # {name, size, to, fh, received, chunks} — streaming upload
     try:
         async for raw in websocket:
-            # Binary frame = file body
+            # Binary frame = file chunk (streaming)
             if isinstance(raw, bytes):
                 if pending_file:
-                    try:
-                        pf = pending_file
-                        save_path = os.path.join(DOWNLOAD_DIR, pf["name"])
-                        with open(save_path, "wb") as f: f.write(raw)
-                        logger.info("File received via binary", name=pf["name"], size=len(raw))
-                        await websocket.send(json.dumps({"type":"file_ok","name":pf["name"],"size":len(raw)}))
-                        peer = pf.get("to", "")
-                        if peer:
-                            route = await forward_file(save_path, peer, LAN_CLIENTS, SK, nostr_publish)
-                            add_message(f"file_{int(time.time()*1000)}", peer, pf["name"], "out", msg_type="file", delivered=1 if route=="lan" else 0)
-                    except Exception as e:
-                        logger.error("File upload failed", error=str(e))
-                        await websocket.send(json.dumps({"type":"error","msg":str(e)}))
-                    pending_file = None
+                    pf = pending_file
+                    pf["fh"].write(raw)
+                    pf["received"] += 1
+                    continue
                 continue
 
             try: frame = json.loads(raw)
@@ -185,13 +175,29 @@ async def ws_handler(websocket):
                     add_message(eid, peer_pubkey, text, "in", delivered=1)
                 continue
 
-            # ── Unified file: JSON header → binary body ──
+            # ── Unified file: JSON header → binary chunks → file_end ──
             if t == "file":
                 size = frame.get("size", 0)
                 if size > FILE_MAX_SIZE:
                     await websocket.send(json.dumps({"type":"error","msg":f"文件过大 ({size} > {FILE_MAX_SIZE})"}))
-                else:
-                    pending_file = {"name": frame.get("name",""), "size": size, "to": frame.get("to","")}
+                    continue
+                name = frame.get("name", "")
+                save_path = os.path.join(DOWNLOAD_DIR, name)
+                fh = open(save_path, "wb")
+                pending_file = {"name": name, "size": size, "to": frame.get("to",""), "fh": fh, "received": 0}
+                continue
+
+            if t == "file_end" and pending_file:
+                pf = pending_file
+                pf["fh"].close()
+                save_path = os.path.join(DOWNLOAD_DIR, pf["name"])
+                logger.info("File received", name=pf["name"], size=os.path.getsize(save_path), chunks=pf["received"])
+                await websocket.send(json.dumps({"type":"file_ok","name":pf["name"],"size":os.path.getsize(save_path)}))
+                peer = pf.get("to", "")
+                if peer:
+                    route = await forward_file(save_path, peer, LAN_CLIENTS, SK, nostr_publish)
+                    add_message(f"file_{int(time.time()*1000)}", peer, pf["name"], "out", msg_type="file", delivered=1 if route=="lan" else 0)
+                pending_file = None
                 continue
 
             # ── LAN peer file send via path (CLI compat) ──

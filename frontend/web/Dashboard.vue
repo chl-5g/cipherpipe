@@ -66,6 +66,9 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
 .btn-file:hover { opacity:0.7; }
 .empty { color:var(--text2); text-align:center; margin-top:60px; line-height:1.8; }
 .empty small { opacity:0.6; }
+.progress-bar { margin-top:6px; height:14px; background:var(--border); border-radius:3px; overflow:hidden; position:relative; }
+.progress-fill { height:100%; background:var(--primary); border-radius:3px; transition:width .1s; }
+.progress-bar span { position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; line-height:14px; color:#fff; }
 </style>
 </head>
 <body>
@@ -120,6 +123,7 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
           <span v-if="m.dir==='out'" :style="{color: m.delivered ? '#58a6ff' : '#8b949e', fontSize:'10px'}">✓</span>
         </div>
         <div class="body">{{ m.text }}</div>
+        <div v-if="m.progress != null" class="progress-bar"><div class="progress-fill" :style="{width: m.progress+'%'}"></div><span>{{ m.progress }}%</span></div>
         <div v-if="m.reactions" class="rx">{{ m.reactions }}</div>
       </div>
     </div>
@@ -183,6 +187,15 @@ createApp({
         setTimeout(connect, 3000);
       };
       ws.value.onmessage = (e) => {
+        // Binary frame = incoming file chunk
+        if (e.data instanceof Blob) {
+          const lastFile = [...messages.value].reverse().find(x => x.dir === 'in' && x.progress != null && x._fchunks);
+          if (lastFile && lastFile._fchunks > 0) {
+            lastFile._frecv = (lastFile._frecv || 0) + 1;
+            lastFile.progress = Math.round((lastFile._frecv / lastFile._fchunks) * 100);
+          }
+          return;
+        }
         const msg = JSON.parse(e.data);
         if (msg.type === 'identity_created') {
           myPubkey.value = msg.pubkey;
@@ -202,6 +215,18 @@ createApp({
           typingText.value = msg.from + ' 正在输入...';
           clearTimeout(typingTimeout);
           typingTimeout = setTimeout(() => { typingText.value = ''; }, 3000);
+          return;
+        }
+        if (msg.type === 'file_start') {
+          const fid = 'recv_' + Date.now();
+          addMsg((msg.from||'').slice(0,12), `[接收中: ${msg.name}]`, 'in', fid);
+          const rm = messages.value.find(x => x.id === fid);
+          if (rm) { rm.progress = 0; rm._fchunks = msg.chunks || 0; rm._fname = msg.name; }
+          return;
+        }
+        if (msg.type === 'file_end') {
+          const lastFile = [...messages.value].reverse().find(x => x.dir === 'in' && x.progress != null && x._fname === msg.name);
+          if (lastFile) { lastFile.progress = 100; lastFile.text = `[file: ${msg.name}]`; }
           return;
         }
         if (msg.type === 'file') {
@@ -270,7 +295,7 @@ createApp({
     }
 
     function addMsg(from, text, dir, eventId, prepend = false, delivered = false) {
-      const m = { id: eventId || 'm' + (++msgId), from, text, dir, delivered, read: false, reactions: '', hover: false };
+      const m = { id: eventId || 'm' + (++msgId), from, text, dir, delivered, read: false, progress: null, reactions: '', hover: false };
       if (prepend) messages.value.unshift(m);
       else messages.value.push(m);
       nextTick(() => {
@@ -292,10 +317,18 @@ createApp({
       inp.onchange = async () => {
         const file = inp.files[0];
         if (!file || !currentPeer.value) return;
-        const buf = await file.arrayBuffer();
-        ws.value.send(JSON.stringify({type:'file', name:file.name, size:buf.byteLength, to: currentPeer.value}));
-        ws.value.send(buf);
-        addMsg('me', `[文件: ${file.name} (${(file.size/1024).toFixed(1)}KB)]`, 'out');
+        const CHUNK = 256 * 1024, chunks = Math.ceil(file.size / CHUNK);
+        const msgId = 'prog_' + Date.now();
+        addMsg('me', `[文件: ${file.name} (${(file.size/1024).toFixed(1)}KB)]`, 'out', msgId);
+        // Progress bar placeholder
+        const m = messages.value.find(x => x.id === msgId);
+        if (m) m.progress = 0;
+        ws.value.send(JSON.stringify({type:'file', name:file.name, size:file.size, chunks, to: currentPeer.value}));
+        for (let i = 0; i < chunks; i++) {
+          ws.value.send(file.slice(i * CHUNK, (i + 1) * CHUNK));
+          if (m) m.progress = Math.round(((i + 1) / chunks) * 100);
+        }
+        ws.value.send(JSON.stringify({type:'file_end', name:file.name}));
       };
       inp.click();
     }

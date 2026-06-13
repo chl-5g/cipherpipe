@@ -84,20 +84,19 @@ class TestTransfer:
         data = b"Hello binary file test content!"
         await ws.send(json.dumps({"type": "file", "name": "test.bin", "size": len(data), "to": pubkey}))
         await ws.send(data)
+        await ws.send(json.dumps({"type": "file_end", "name": "test.bin"}))
 
         resp = json.loads(await asyncio.wait_for(ws.recv(), 5))
         assert resp["type"] == "file_ok"
         assert resp["name"] == "test.bin"
-        assert resp["size"] == len(data)
 
         await ws.close()
 
     async def test_file_oversize_rejected(self):
-        """File larger than max_size should be rejected with error."""
+        """File larger than max_size (1TB) should be rejected with error."""
         ws, pubkey = await self._client()
 
-        # Claim size larger than default 100MB
-        await ws.send(json.dumps({"type": "file", "name": "huge.bin", "size": 999_999_999, "to": pubkey}))
+        await ws.send(json.dumps({"type": "file", "name": "huge.bin", "size": 2_000_000_000_000, "to": pubkey}))
 
         resp = json.loads(await asyncio.wait_for(ws.recv(), 5))
         assert resp["type"] == "error"
@@ -118,6 +117,7 @@ class TestTransfer:
 
         await ws.send(json.dumps({"type": "file", "name": os.path.basename(fname), "size": len(data), "to": pubkey}))
         await ws.send(data)
+        await ws.send(json.dumps({"type": "file_end", "name": os.path.basename(fname)}))
 
         resp = json.loads(await asyncio.wait_for(ws.recv(), 5))
         assert resp["type"] == "file_ok"

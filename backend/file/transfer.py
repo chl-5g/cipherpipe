@@ -49,26 +49,24 @@ async def send_file_chunked(sk, peer_pubkey, filepath, publish_fn):
 
 
 async def forward_file(filepath, peer_pubkey, lan_clients, sk, publish_fn, data_dir=DOWNLOAD_DIR):
-    """Read file, chunk-forward to peer via LAN or Nostr relay."""
-    import base64 as b64
-    with open(filepath, "rb") as f:
-        data = f.read()
+    """Stream-chunk file to peer via LAN (binary frames) or Nostr relay."""
     name = os.path.basename(filepath)
+    size = os.path.getsize(filepath)
     CHUNK = 256 * 1024
-    total = max((len(data) + CHUNK - 1) // CHUNK, 1)
+    total = max((size + CHUNK - 1) // CHUNK, 1)
     if peer_pubkey in lan_clients:
         ws = lan_clients[peer_pubkey]
-        await ws.send(json.dumps({"type": "file_start", "name": name, "size": len(data), "total_chunks": total}))
-        for i in range(total):
-            chunk = data[i*CHUNK:(i+1)*CHUNK]
-            await ws.send(json.dumps({"type": "file_chunk", "index": i, "total": total, "name": name, "data": b64.b64encode(chunk).decode()}))
+        await ws.send(json.dumps({"type": "file_start", "name": name, "size": size, "chunks": total}))
+        with open(filepath, "rb") as f:
+            while True:
+                chunk = f.read(CHUNK)
+                if not chunk:
+                    break
+                await ws.send(chunk)
         await ws.send(json.dumps({"type": "file_end", "name": name}))
         return "lan"
     else:
-        save_path = os.path.join(data_dir, name)
-        with open(save_path, "wb") as f:
-            f.write(data)
-        await send_file_chunked(sk, peer_pubkey, save_path, publish_fn)
+        await send_file_chunked(sk, peer_pubkey, filepath, publish_fn)
         return "relay"
 
 

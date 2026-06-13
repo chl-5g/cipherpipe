@@ -45,14 +45,30 @@ async def main():
     asyncio.create_task(display_loop())
 
     # ── Receiver ──
+    _frecv = {"name": "", "chunks": 0, "got": 0}
     async def receiver():
+        nonlocal _frecv
         try:
             async for raw in ws:
+                if isinstance(raw, bytes):
+                    _frecv["got"] += 1
+                    if _frecv["chunks"] > 0:
+                        pct = int(_frecv["got"] / _frecv["chunks"] * 100)
+                        _print(f"\033[2m[recv: {_frecv['name']}] {pct}%\033[0m")
+                    continue
                 frame = json.loads(raw)
                 t = frame.get("type", "")
                 frm = frame.get("from", "")
                 if t == "read_receipt":
                     await _display.put("\033[34m✓ 对方已读\033[0m")
+                    continue
+                if t == "file_start":
+                    _frecv = {"name": frame.get("name",""), "chunks": frame.get("chunks",0), "got": 0}
+                    await _display.put(f"\033[2m[recv: {_frecv['name']}] 0%\033[0m")
+                    continue
+                if t == "file_end":
+                    await _display.put(f"\033[36m{frm}\033[0m \033[2m{_ts()}\033[0m  [file: {frame.get('name','')}]")
+                    _frecv = {"name": "", "chunks": 0, "got": 0}
                     continue
                 if t == "msg" and frm == "me":
                     txt = frame.get("text","")
@@ -105,11 +121,17 @@ async def main():
             if os.path.isfile(filepath):
                 name = os.path.basename(filepath)
                 size = os.path.getsize(filepath)
-                _print(f"\033[2m{_ts()} → [send: {name}]\033[0m")
+                CHUNK = 256 * 1024
+                chunks = (size + CHUNK - 1) // CHUNK
+                _print(f"\033[2m{_ts()} → [send: {name}] 0%\033[0m")
+                await ws.send(json.dumps({"type": "file", "name": name, "size": size, "chunks": chunks, "to": peer}))
                 with open(filepath, "rb") as f:
-                    data = f.read()
-                await ws.send(json.dumps({"type": "file", "name": name, "size": size, "to": peer}))
-                await ws.send(data)
+                    for i in range(chunks):
+                        chunk = f.read(CHUNK)
+                        await ws.send(chunk)
+                        pct = int((i + 1) / chunks * 100)
+                        if pct % 20 == 0 or i == chunks - 1:
+                            _print(f"\033[2m{_ts()} → [send: {name}] {pct}%\033[0m")
             else:
                 _print(f"\033[31mfile not found: {filepath}\033[0m")
             continue

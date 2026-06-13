@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""CipherPipe proxy — Nostr bridge with Schnorr event signing."""
-import asyncio, json, logging, os, sys, time, hashlib, secrets, base64
+"""CipherPipe proxy — Nostr bridge + LAN fast-path. Persistent relay connections."""
+import asyncio, json, logging, os, sys, time, hashlib, secrets, base64, socket
 from datetime import datetime
-from urllib.parse import urlparse, parse_qs
 
 import structlog
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes as crypto_hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 import coincurve
 import websockets
@@ -23,206 +21,167 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 
 # ── Logging ──
 structlog.configure(
-    processors=[
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.dev.ConsoleRenderer()
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
+    processors=[structlog.stdlib.add_log_level, structlog.processors.TimeStamper(fmt="iso"), structlog.dev.ConsoleRenderer()],
+    wrapper_class=structlog.stdlib.BoundLogger, context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(), cache_logger_on_first_use=True,
 )
 logger = structlog.get_logger("cipherpipe")
 log_file = os.path.join(LOGS_DIR, f"cipherpipe-{datetime.now():%Y-%m-%d}.jsonl")
 json_fh = logging.FileHandler(log_file); json_fh.setLevel(logging.DEBUG)
 file_logger = logging.getLogger("cipherpipe.file"); file_logger.addHandler(json_fh); file_logger.setLevel(logging.DEBUG)
-
-def log_event(event: str, **kwargs):
-    file_logger.info(json.dumps({"event": event, "ts": time.time(), **kwargs}, ensure_ascii=False))
-
+def log_event(ev, **kw): file_logger.info(json.dumps({"event":ev,"ts":time.time(),**kw},ensure_ascii=False))
 
 # ── Config ──
-RELAYS = [
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.nostr.band",
-]
+RELAYS = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"]
 PROXY_PORT = 8701
+LAN_WS_PORT = 8702
 KEY_FILE = os.path.join(BASE_DIR, "nostr.key")
+RELAY_POOL = {}  # url -> ws
+EVENT_QUEUE = asyncio.Queue()
 
-
-# ── Key (coincurve, secp256k1) ──
+# ── Key ──
 def load_or_create_key():
     if os.path.exists(KEY_FILE):
-        with open(KEY_FILE) as f:
-            hexkey = f.read().strip()
-        pk = coincurve.PrivateKey.from_hex(hexkey)
-        return pk, pk.public_key.format().hex()
+        with open(KEY_FILE) as f: return coincurve.PrivateKey.from_hex(f.read().strip())
     pk = coincurve.PrivateKey()
-    pub_hex = pk.public_key.format().hex()
-    with open(KEY_FILE, "w") as f:
-        f.write(pk.format().hex())
-    logger.info(f"New identity: {pub_hex[:16]}...")
-    log_event("key_created", pubkey=pub_hex[:16])
-    return pk, pub_hex
+    with open(KEY_FILE, "w") as f: f.write(pk.format().hex())
+    return pk
 
-
-# ── Nostr event signing (Schnorr) ──
-def sign_event(sk: coincurve.PrivateKey, kind: int, content: str, tags: list) -> dict:
-    """Create and sign a Nostr event."""
+# ── Nostr events ──
+def sign_event(sk, kind, content, tags):
     pubkey = sk.public_key.format().hex()
     created_at = int(time.time())
-    serialized = json.dumps([0, pubkey, created_at, kind, tags, content], separators=(",", ":"))
-    event_id = hashlib.sha256(serialized.encode()).hexdigest()
-    sig = sk.schnorr_sign(bytes.fromhex(event_id)).hex()
-    return {
-        "id": event_id, "pubkey": pubkey, "created_at": created_at,
-        "kind": kind, "tags": tags, "content": content, "sig": sig
-    }
+    s = json.dumps([0, pubkey, created_at, kind, tags, content], separators=(",", ":"))
+    eid = hashlib.sha256(s.encode()).hexdigest()
+    return {"id": eid, "pubkey": pubkey, "created_at": created_at, "kind": kind, "tags": tags, "content": content, "sig": sk.schnorr_sign(bytes.fromhex(eid)).hex()}
 
-
-def verify_event(event: dict) -> bool:
-    """Verify a Nostr event signature."""
-    serialized = json.dumps([0, event["pubkey"], event["created_at"],
-                              event["kind"], event["tags"], event["content"]], separators=(",", ":"))
-    event_id = hashlib.sha256(serialized.encode()).hexdigest()
-    if event.get("id", "") != event_id:
-        return False
-    pub = coincurve.PublicKey.from_hex(event["pubkey"])
-    return pub.schnorr_verify(bytes.fromhex(event_id), bytes.fromhex(event["sig"]))
-
+def verify_event(e):
+    s = json.dumps([0, e["pubkey"], e["created_at"], e["kind"], e["tags"], e["content"]], separators=(",", ":"))
+    return e.get("id") == hashlib.sha256(s.encode()).hexdigest() and coincurve.PublicKey.from_hex(e["pubkey"]).schnorr_verify(bytes.fromhex(e["id"]), bytes.fromhex(e["sig"]))
 
 # ── NIP-44 ──
-def nip44_encrypt(privkey, recipient_pub_hex: str, plaintext: str) -> str:
-    pkb = bytes.fromhex(recipient_pub_hex)
-    pub_ec = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), pkb)
-    sk_ec = ec.derive_private_key(int(privkey.format().hex(), 16), ec.SECP256K1())
-    shared = sk_ec.exchange(ec.ECDH(), pub_ec)
-    hkdf = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"")
-    key = hkdf.derive(shared)
+def _ec_priv(sk): return ec.derive_private_key(int(sk.format().hex(), 16), ec.SECP256K1())
+def _ec_pub(h): return ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), bytes.fromhex(h))
+
+def nip44_encrypt(sk, to_pub, text):
+    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(to_pub))
+    key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
     nonce = secrets.token_bytes(12)
-    chacha = ChaCha20Poly1305(key)
-    ct = chacha.encrypt(nonce, plaintext.encode(), None)
+    ct = ChaCha20Poly1305(key).encrypt(nonce, text.encode(), None)
     return base64.b64encode(nonce + ct).decode()
 
-def nip44_decrypt(privkey, sender_pub_hex: str, encrypted_b64: str) -> str:
-    pkb = bytes.fromhex(sender_pub_hex)
-    pub_ec = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), pkb)
-    sk_ec = ec.derive_private_key(int(privkey.format().hex(), 16), ec.SECP256K1())
-    shared = sk_ec.exchange(ec.ECDH(), pub_ec)
-    hkdf = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"")
-    key = hkdf.derive(shared)
-    payload = base64.b64decode(encrypted_b64)
-    nonce, ct = payload[:12], payload[12:]
-    chacha = ChaCha20Poly1305(key)
-    return chacha.decrypt(nonce, ct, None).decode()
+def nip44_decrypt(sk, from_pub, blob):
+    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_pub))
+    key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
+    payload = base64.b64decode(blob)
+    return ChaCha20Poly1305(key).decrypt(payload[:12], payload[12:], None).decode()
 
-
-# ── Nostr relay ──
-async def nostr_subscribe(sk):
-    """Connect to relays, listen for encrypted DMs, verify + decrypt."""
+# ── Persistent relay pool ──
+async def relay_connect(url, sk):
+    """Persistent connection to one relay. Read + write on the same WS."""
+    pubkey = sk.public_key.format().hex()
     while True:
-        for relay_url in RELAYS:
-            try:
-                ws = await websockets.connect(relay_url)
-                logger.info(f"Connected to {relay_url}")
-                log_event("relay_connected", url=relay_url)
-                sub = json.dumps(["REQ", "cp_sub", {"kinds": [4, 1059], "since": int(time.time())}])
-                await ws.send(sub)
-                async for raw in ws:
-                    try:
-                        msg = json.loads(raw)
-                        if msg[0] == "EVENT" and msg[1] == "cp_sub":
-                            event = msg[2]
-                            if not verify_event(event):
-                                continue
-                            try:
-                                pt = nip44_decrypt(sk, event["pubkey"], event["content"])
-                                yield {"pubkey": event["pubkey"], "text": pt, "event": event}
-                            except Exception:
-                                pass  # not for us
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Relay {relay_url}: {e}")
-                await asyncio.sleep(5)
-
-
-async def nostr_publish(event: dict):
-    msg = json.dumps(["EVENT", event])
-    for relay_url in RELAYS:
         try:
-            async with websockets.connect(relay_url) as ws:
-                await ws.send(msg)
-        except Exception:
-            pass
+            ws = await websockets.connect(url, ping_interval=20, ping_timeout=10)
+            RELAY_POOL[url] = ws
+            logger.info(f"Connected to {url}")
+            log_event("relay_connected", url=url)
+            # Subscribe to our DMs
+            await ws.send(json.dumps(["REQ", "cp_sub", {"kinds": [4, 1059], "#p": [pubkey], "since": int(time.time())}]))
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                    if msg[0] == "EVENT" and msg[1] == "cp_sub":
+                        event = msg[2]
+                        if not verify_event(event): continue
+                        try:
+                            pt = nip44_decrypt(sk, event["pubkey"], event["content"])
+                            await EVENT_QUEUE.put({"pubkey": event["pubkey"], "text": pt})
+                        except Exception: pass
+                except Exception: pass
+        except Exception as e:
+            RELAY_POOL.pop(url, None)
+            logger.warning(f"Relay {url}: {e}")
+            await asyncio.sleep(5)
 
+async def start_relay_pool(sk):
+    """Connect to all relays in parallel."""
+    for url in RELAYS:
+        asyncio.create_task(relay_connect(url, sk))
 
-# ── HTTP ──
-def serve_html(path):
+async def nostr_publish(event):
+    """Publish to all persistent relay connections instantly."""
+    msg = json.dumps(["EVENT", event])
+    for url, ws in list(RELAY_POOL.items()):
+        try: await ws.send(msg)
+        except Exception: RELAY_POOL.pop(url, None)
+
+# ── LAN WebSocket (fast path) ──
+async def lan_handler(websocket):
     try:
-        with open(os.path.join(BASE_DIR, path), "rb") as f:
-            return HTTPResponse(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), f.read())
-    except FileNotFoundError:
-        return HTTPResponse(404, "Not Found", Headers({}), b"Not found")
-
-async def process_request(connection, request):
-    if request.path == "/":
-        return serve_html("dashboard.html")
-    return None  # WebSocket upgrade
-
+        async for raw in websocket:
+            try: frame = json.loads(raw)
+            except json.JSONDecodeError: continue
+            if frame.get("type") == "msg":
+                pt = frame.get("text", "")
+                out = json.dumps({"type":"msg","from":"lan","text":pt})
+                await websocket.send(out)
+                log_event("lan_msg")
+    except Exception: pass
 
 # ── Browser WebSocket ──
 BROWSERS = set()
 
 async def ws_handler(websocket):
     BROWSERS.add(websocket)
-    # Send identity to browser
-    await websocket.send(json.dumps({"type": "identity", "pubkey": PUBKEY[:16] + "..."}))
+    await websocket.send(json.dumps({"type":"identity","pubkey":PUBKEY[:16]+"..."}))
     try:
         async for raw in websocket:
-            try:
-                frame = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            t = frame.get("type", "")
+            try: frame = json.loads(raw)
+            except json.JSONDecodeError: continue
+            t = frame.get("type","")
             if t == "msg":
-                text = frame.get("text", "")
-                peer = frame.get("to", "")
-                if not text or not peer:
-                    continue
+                text, peer = frame.get("text",""), frame.get("to","")
+                if not text or not peer: continue
                 encrypted = nip44_encrypt(SK, peer, text)
                 event = sign_event(SK, 4, encrypted, [["p", peer]])
                 await nostr_publish(event)
-                await websocket.send(json.dumps({"type": "msg", "from": "me", "text": text}))
+                await websocket.send(json.dumps({"type":"msg","from":"me","text":text}))
                 log_event("msg_sent", to=peer[:12])
-    finally:
-        BROWSERS.discard(websocket)
+    finally: BROWSERS.discard(websocket)
 
-
-async def nostr_relay_to_browsers(sk):
-    """Nostr → decrypt → browser."""
-    async for msg in nostr_subscribe(sk):
-        out = json.dumps({"type": "msg", "from": msg["pubkey"][:12], "text": msg["text"]})
+# ── Queue → browsers ──
+async def queue_to_browsers():
+    while True:
+        msg = await EVENT_QUEUE.get()
+        out = json.dumps({"type":"msg","from":msg["pubkey"][:12],"text":msg["text"]})
         for bw in list(BROWSERS):
-            try:
-                await bw.send(out)
-            except Exception:
-                BROWSERS.discard(bw)
+            try: await bw.send(out)
+            except Exception: BROWSERS.discard(bw)
 
+# ── HTTP ──
+def serve_html(p):
+    try:
+        with open(os.path.join(BASE_DIR,p),"rb") as f:
+            return HTTPResponse(200,"OK",Headers({"Content-Type":"text/html; charset=utf-8"}),f.read())
+    except FileNotFoundError: return HTTPResponse(404,"Not Found",Headers({}),b"Not found")
+async def process_request(c, r):
+    if r.path == "/": return serve_html("dashboard.html")
+    return None
 
 # ── Main ──
-SK = None
-PUBKEY = None
+SK = None; PUBKEY = None
 
 async def main():
     global SK, PUBKEY
-    SK, PUBKEY = load_or_create_key()
-    logger.info(f"CipherPipe Nostr bridge on :{PROXY_PORT}")
-    logger.info(f"Identity: {PUBKEY[:16]}...")
-    log_event("server_start", port=PROXY_PORT)
+    SK = load_or_create_key(); PUBKEY = SK.public_key.format().hex()
+    logger.info(f"CipherPipe :{PROXY_PORT} | LAN WS :{LAN_WS_PORT} | Identity: {PUBKEY[:16]}...")
+    log_event("server_start", port=PROXY_PORT, lan_port=LAN_WS_PORT)
 
-    asyncio.create_task(nostr_relay_to_browsers(SK))
+    await start_relay_pool(SK)
+    asyncio.create_task(queue_to_browsers())
+
+    lan_server = await websockets.serve(lan_handler, "0.0.0.0", LAN_WS_PORT)
     async with serve(ws_handler, "0.0.0.0", PROXY_PORT, process_request=process_request):
         await asyncio.Future()
 

@@ -10,3 +10,4 @@ logs/
 data/downloads/
 src/data/
 .DS_Store
+.venv/

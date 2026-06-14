@@ -10,7 +10,7 @@ from websockets.asyncio.server import serve
 from websockets.http11 import Response as HTTPResponse
 from websockets.datastructures import Headers
 
-from backend.core.crypto import load_or_create_key, sign_event, verify_event, nip44_encrypt, nip44_decrypt
+from backend.core.crypto import load_or_create_key, sign_event, verify_event, nip44_encrypt, nip44_decrypt, to_nostr_pk
 from backend.core.store import init_db, add_message, get_messages, search_messages, upsert_contact, list_contacts, delete_contact, get_state, set_state, mark_delivered
 from backend.network.relay import load_relays, select_best_relays
 from backend.core.config import PORT, RELAYS as DEFAULT_RELAYS, KEY_FILE, PROJECT_DIR, FILE_MAX_SIZE
@@ -166,8 +166,9 @@ async def ws_handler(websocket):
                 peer_pubkey = frame.get("pubkey", "")
                 LAN_CLIENTS[peer_pubkey] = websocket
                 BROWSERS.discard(websocket)
-                new_pubkey = peer_pubkey not in WATCHED_PUBKEYS
-                WATCHED_PUBKEYS.add(peer_pubkey)
+                nostr_pk = to_nostr_pk(peer_pubkey)
+                new_pubkey = nostr_pk not in WATCHED_PUBKEYS
+                WATCHED_PUBKEYS.add(nostr_pk)
                 await websocket.send(json.dumps({"type": "lan_hello_ack", "pubkey": PUBKEY}))
                 log_event("lan_peer_joined", pubkey=peer_pubkey[:12])
                 if new_pubkey:
@@ -192,7 +193,7 @@ async def ws_handler(websocket):
                     add_message(eid, peer_pubkey, text, "in", delivered=1)
                 else:
                     encrypted = nip44_encrypt(SK, target, text)
-                    event = sign_event(SK, 4, encrypted, [["p", target]])
+                    event = sign_event(SK, 4, encrypted, [["p", to_nostr_pk(target)]])
                     await nostr_publish(event)
                     await websocket.send(json.dumps({"type": "msg", "id": event["id"], "from": "me", "text": text, "delivered": False}))
                     add_message(event["id"], target, text, "out")
@@ -307,7 +308,7 @@ async def ws_handler(websocket):
                     log_event("msg_sent_lan", to=peer[:12])
                     continue
                 encrypted = nip44_encrypt(SK, peer, text)
-                event = sign_event(SK, 4, encrypted, [["p", peer]])
+                event = sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]])
                 await nostr_publish(event)
                 await websocket.send(json.dumps({"type": "msg", "id": event["id"], "from": "me", "text": text, "delivered": False}))
                 add_message(event["id"], peer, text, "out")
@@ -319,7 +320,7 @@ async def ws_handler(websocket):
                 if filepath and peer:
                     offer = make_file_offer(filepath, peer in LAN_CLIENTS)
                     encrypted = nip44_encrypt(SK, peer, json.dumps(offer))
-                    event = sign_event(SK, 4, encrypted, [["p", peer]])
+                    event = sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]])
                     await nostr_publish(event)
                     await websocket.send(json.dumps({"type": "file_offer_sent", "file_id": offer["file_id"]}))
                 # Browser sends inline file data (name + data) instead of path
@@ -339,7 +340,7 @@ async def ws_handler(websocket):
                         log_event("file_offer_sent_lan", to=peer[:12])
                     else:
                         encrypted = nip44_encrypt(SK, peer, notify)
-                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer]]))
+                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]]))
                     await websocket.send(json.dumps({"type":"file_sent","name":name,"size":len(file_data)}))
             elif t == "typing":
                 peer = frame.get("to", "")
@@ -349,7 +350,7 @@ async def ws_handler(websocket):
                         await LAN_CLIENTS[peer].send(out)
                     else:
                         encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "typing"}))
-                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer]]))
+                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]]))
             elif t == "read_receipt":
                 peer, eid = frame.get("peer", ""), frame.get("event_id", "")
                 if peer and eid:
@@ -358,7 +359,7 @@ async def ws_handler(websocket):
                         await LAN_CLIENTS[peer].send(out)
                     else:
                         encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "read_receipt", "event_id": eid, "read_at": int(time.time())}))
-                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer]]))
+                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]]))
             elif t == "reaction":
                 peer, eid, emoji = frame.get("peer",""), frame.get("event_id",""), frame.get("emoji","")
                 if peer and eid and emoji:
@@ -367,7 +368,7 @@ async def ws_handler(websocket):
                         await LAN_CLIENTS[peer].send(out)
                     else:
                         encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "reaction", "event_id": eid, "emoji": emoji}))
-                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", peer], ["e", eid]]))
+                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)], ["e", eid]]))
                     # Persist with dedup via unique event_id
                     add_message(f"rxn_{PUBKEY[:12]}_{eid}_{emoji}", peer, emoji, "out", msg_type="reaction")
             elif t == "contacts":
@@ -434,7 +435,7 @@ async def main():
     global SK, PUBKEY, WATCHED_PUBKEYS
     SK = load_or_create_key(KEY_FILE)
     PUBKEY = SK.public_key.format().hex()
-    WATCHED_PUBKEYS = {PUBKEY}
+    WATCHED_PUBKEYS = {to_nostr_pk(PUBKEY)}
     init_db()
     logger.info(f"CipherPipe :{PORT}  |  Identity: {PUBKEY[:16]}...")
     log_event("server_start", port=PORT)

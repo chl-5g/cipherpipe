@@ -11,6 +11,20 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from backend.core.config import KEY_FILE as _DEFAULT_KEYFILE
 
+
+def to_nostr_pk(pk_hex):
+    """66-char compressed pubkey → 64-char Nostr pubkey (strip parity prefix)."""
+    if len(pk_hex) == 66 and pk_hex[:2] in ("02", "03"):
+        return pk_hex[2:]
+    return pk_hex
+
+
+def from_nostr_pk(pk_hex):
+    """64-char Nostr pubkey → 66-char compressed pubkey (add even-y prefix)."""
+    if len(pk_hex) == 64:
+        return "02" + pk_hex
+    return pk_hex
+
 def load_or_create_key(keyfile=None):
     if keyfile is None:
         keyfile = _DEFAULT_KEYFILE
@@ -26,7 +40,8 @@ def load_or_create_key(keyfile=None):
 
 
 def sign_event(sk, kind, content, tags):
-    pubkey = sk.public_key.format().hex()
+    pubkey_full = sk.public_key.format().hex()
+    pubkey = to_nostr_pk(pubkey_full)
     created_at = int(time.time())
     s = json.dumps([0, pubkey, created_at, kind, tags, content], separators=(",", ":"))
     eid = hashlib.sha256(s.encode()).hexdigest()
@@ -52,7 +67,7 @@ def _ec_pub(h):
 
 
 def nip44_encrypt(sk, to_pub, text):
-    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(to_pub))
+    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_nostr_pk(to_pub)))
     key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
     nonce = secrets.token_bytes(12)
     ct = ChaCha20Poly1305(key).encrypt(nonce, text.encode(), None)
@@ -60,7 +75,7 @@ def nip44_encrypt(sk, to_pub, text):
 
 
 def nip44_decrypt(sk, from_pub, blob):
-    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_pub))
+    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_nostr_pk(from_pub)))
     key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
     payload = base64.b64decode(blob)
     return ChaCha20Poly1305(key).decrypt(payload[:12], payload[12:], None).decode()

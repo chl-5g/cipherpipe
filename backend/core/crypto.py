@@ -54,8 +54,7 @@ def verify_event(e):
     s = json.dumps([0, e["pubkey"], e["created_at"], e["kind"], e["tags"], e["content"]], separators=(",", ":"))
     if e.get("id") != hashlib.sha256(s.encode()).hexdigest():
         return False
-    pk_hex = from_nostr_pk(e["pubkey"])
-    return coincurve.PublicKey.from_hex(pk_hex).public_key_xonly.verify(
+    return coincurve.PublicKeyXOnly(bytes.fromhex(e["pubkey"])).verify(
         bytes.fromhex(e["sig"]), bytes.fromhex(e["id"]))
 
 

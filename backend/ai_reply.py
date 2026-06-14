@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""CipherPipe AI auto-reply bot — inbox monitor + LLM reply + idle timeout."""
+"""CipherPipe AI auto-reply bot — inbox monitor + LLM reply + idle timeout.
+LLM backend: local Ollama → remote API → echo fallback."""
 import asyncio, json, os, sys, time
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -9,18 +10,60 @@ INBOX = os.path.join(PROJECT_DIR, "data", "inbox.jsonl")
 OUTBOX = os.path.join(PROJECT_DIR, "data", "outbox.jsonl")
 IDLE_TIMEOUT = 30  # seconds
 
-# ── LLM backend ──
 _SYSTEM = "你是 CipherPipe 的 AI 助手。简洁回复，不超过三句话。"
 
-async def call_llm(message_text):
-    """Call Claude/GLM API. Falls back to echo if no key."""
+# ── Local LLM config ──
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b-nothink")
+
+
+def _check_ollama_sync():
+    """Return True if Ollama is reachable."""
+    try:
+        import requests as req
+        r = req.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+async def _check_ollama():
+    return await asyncio.to_thread(_check_ollama_sync)
+
+
+def _call_ollama_sync(message_text):
+    """Call local Ollama model (sync)."""
+    import requests as req
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": message_text},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.7, "num_predict": 256},
+    }
+    r = req.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=60)
+    if r.status_code == 200:
+        return r.json()["message"]["content"].strip()
+    return None
+
+
+async def call_ollama(message_text):
+    try:
+        return await asyncio.to_thread(_call_ollama_sync, message_text)
+    except Exception as e:
+        print(f"  [ollama error] {e}")
+        return None
+
+
+async def call_remote_api(message_text):
+    """Call remote LLM via Anthropic-compatible API."""
     api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GLM_API_KEY")
     if not api_key:
-        return f"[echo] {message_text}"
-
+        return None
     base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     model = os.environ.get("LLM_MODEL", "claude-sonnet-4-6")
-
     try:
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
@@ -32,9 +75,31 @@ async def call_llm(message_text):
         )
         return resp.content[0].text
     except ImportError:
-        return f"[echo] {message_text}"
+        return None
     except Exception as e:
-        return f"[LLM error: {e}]"
+        print(f"  [api error] {e}")
+        return None
+
+
+async def call_llm(message_text):
+    """Try local Ollama first, then remote API, then echo."""
+    # 1. Local Ollama
+    if await _check_ollama():
+        print("  [backend: ollama]")
+        reply = await call_ollama(message_text)
+        if reply:
+            return reply
+
+    # 2. Remote API
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GLM_API_KEY")
+    if api_key:
+        print("  [backend: remote api]")
+        reply = await call_remote_api(message_text)
+        if reply is not None:
+            return reply
+
+    # 3. Echo fallback
+    return f"[echo] {message_text}"
 
 
 async def main():

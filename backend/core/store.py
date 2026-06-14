@@ -72,12 +72,14 @@ def init_db():
 @_retry_on_lock
 def add_message(event_id, pubkey, content, direction, msg_type="text", created_at=None, received_at=None, delivered=0):
     db = get_db()
+    changes_before = db.total_changes
     db.execute(
         "INSERT OR IGNORE INTO messages(event_id, pubkey, content, msg_type, direction, created_at, received_at, delivered) VALUES(?,?,?,?,?,?,?,?)",
         (event_id, pubkey, content, msg_type, direction, created_at or int(time.time()), received_at or int(time.time()), delivered)
     )
-    row_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-    db.execute("INSERT INTO messages_fts(rowid, pubkey, content) VALUES(?,?,?)", (row_id, pubkey[:12], content))
+    if db.total_changes > changes_before:
+        row_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        db.execute("INSERT INTO messages_fts(rowid, pubkey, content) VALUES(?,?,?)", (row_id, pubkey[:12], content))
     db.commit()
     db.close()
 

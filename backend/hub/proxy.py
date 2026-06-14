@@ -68,9 +68,12 @@ async def relay_connect(url, sk):
                         parsed = _parse(pt)
                         await EVENT_QUEUE.put({"event_id": event["id"], "pubkey": event["pubkey"],
                             "text": pt, "msg_type": parsed.get("type", "msg"), "parsed": parsed, "created_at": event["created_at"]})
-                        set_state("last_received_at", event["created_at"])
-                        add_message(event["id"], event["pubkey"], pt, "in", created_at=event["created_at"])
                         log_event("relay_msg_decrypted", from_pk=event["pubkey"][:16], text=pt[:100])
+                        set_state("last_received_at", event["created_at"])
+                        try:
+                            add_message(event["id"], event["pubkey"], pt, "in", created_at=event["created_at"])
+                        except Exception as e:
+                            log_event("relay_db_write_fail", error=str(e)[:80])
                     except Exception as e:
                         log_event("relay_decrypt_fail", from_pk=event["pubkey"][:16], error=str(e)[:80])
 

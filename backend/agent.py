@@ -133,19 +133,18 @@ async def main():
                             f.seek(last_size)
                             for line in f:
                                 line = line.strip()
-                                if not line:
-                                    continue
-                                target = reply_target
-                                text = line
-                                try:
-                                    entry = json.loads(line)
-                                    if isinstance(entry, dict):
-                                        text = entry.get("text", line)
-                                        target = entry.get("to", reply_target)
-                                except (json.JSONDecodeError, TypeError):
-                                    pass
-                                await ws.send(json.dumps({"type": "msg", "text": text, "to": target}))
-                                log.info("← sent", text=text[:100])
+                                if line:
+                                    target = reply_target
+                                    text = line
+                                    try:
+                                        parsed = json.loads(line)
+                                        if isinstance(parsed, dict) and "text" in parsed:
+                                            text = parsed["text"]
+                                            target = parsed.get("to", reply_target)
+                                    except (json.JSONDecodeError, TypeError):
+                                        pass
+                                    await ws.send(json.dumps({"type": "msg", "text": text, "to": target}))
+                                    log.info("← sent", text=text[:100])
                         last_size = sz
                     await asyncio.sleep(0.5)
 

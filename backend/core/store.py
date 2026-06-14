@@ -1,18 +1,32 @@
 #!/usr/bin/env python3
 """SQLite persistence for messages, contacts, and state."""
-import sqlite3, os, time
+import sqlite3, os, time, random
 from backend.core.config import DATA_DIR
 
 DB_PATH = os.path.join(DATA_DIR, "cipherpipe.db")
 
 
 def get_db():
-    db = sqlite3.connect(DB_PATH, timeout=10)
+    db = sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=10000")
+    db.execute("PRAGMA busy_timeout=30000")
+    db.execute("PRAGMA synchronous=NORMAL")
     return db
+
+
+def _retry_on_lock(fn):
+    def wrapper(*a, **kw):
+        for attempt in range(5):
+            try:
+                return fn(*a, **kw)
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < 4:
+                    time.sleep(random.uniform(0.05, 0.2) * (attempt + 1))
+                    continue
+                raise
+    return wrapper
 
 
 def init_db():
@@ -55,6 +69,7 @@ def init_db():
     db.close()
 
 
+@_retry_on_lock
 def add_message(event_id, pubkey, content, direction, msg_type="text", created_at=None, received_at=None, delivered=0):
     db = get_db()
     db.execute(

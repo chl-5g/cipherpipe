@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CipherPipe AI auto-reply bot — inbox monitor + LLM reply + idle timeout.
-LLM backend: local Ollama → remote API → echo fallback."""
+Set CP_AI_BACKEND in .env to choose: ollama | openai | anthropic."""
 import asyncio, json, os, sys, time
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -12,93 +12,123 @@ IDLE_TIMEOUT = 30  # seconds
 
 _SYSTEM = "你是 CipherPipe 的 AI 助手。简洁回复，不超过三句话。"
 
-# ── Local LLM config ──
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b-nothink")
+BACKEND = os.environ.get("CP_AI_BACKEND", "")
 
 
-def _check_ollama_sync():
-    """Return True if Ollama is reachable."""
-    try:
-        import requests as req
-        r = req.get(f"{OLLAMA_URL}/api/tags", timeout=3)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-async def _check_ollama():
-    return await asyncio.to_thread(_check_ollama_sync)
-
-
-def _call_ollama_sync(message_text):
-    """Call local Ollama model (sync)."""
-    import requests as req
+# ══════════════════════════════════════════
+#  Ollama backend
+# ══════════════════════════════════════════
+async def _ollama_chat(text):
+    url = os.environ.get("CP_AI_OLLAMA_URL", "")
+    model = os.environ.get("CP_AI_OLLAMA_MODEL", "")
+    if not url or not model:
+        print("  [ollama] CP_AI_OLLAMA_URL and CP_AI_OLLAMA_MODEL required")
+        return None
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": message_text},
+            {"role": "user", "content": text},
         ],
         "stream": False,
         "options": {"temperature": 0.7, "num_predict": 256},
     }
-    r = req.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=60)
-    if r.status_code == 200:
-        return r.json()["message"]["content"].strip()
-    return None
 
+    def _post():
+        import requests as req
+        r = req.post(f"{url}/api/chat", json=payload, timeout=60)
+        if r.status_code == 200:
+            return r.json()["message"]["content"].strip()
+        return None
 
-async def call_ollama(message_text):
     try:
-        return await asyncio.to_thread(_call_ollama_sync, message_text)
+        return await asyncio.to_thread(_post)
     except Exception as e:
         print(f"  [ollama error] {e}")
         return None
 
 
-async def call_remote_api(message_text):
-    """Call remote LLM via Anthropic-compatible API."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GLM_API_KEY")
-    if not api_key:
+# ══════════════════════════════════════════
+#  OpenAI-compatible backend
+# ══════════════════════════════════════════
+async def _openai_chat(text):
+    url = os.environ.get("CP_AI_OPENAI_URL", "")
+    key = os.environ.get("CP_AI_OPENAI_KEY", "")
+    model = os.environ.get("CP_AI_OPENAI_MODEL", "")
+    if not url or not key or not model:
+        print("  [openai] CP_AI_OPENAI_URL, CP_AI_OPENAI_KEY, CP_AI_OPENAI_MODEL required")
         return None
-    base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-    model = os.environ.get("LLM_MODEL", "claude-sonnet-4-6")
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": text},
+        ],
+        "max_tokens": 256,
+        "temperature": 0.7,
+    }
+
+    def _post():
+        import requests as req
+        r = req.post(f"{url}/chat/completions", json=payload,
+                     headers={"Authorization": f"Bearer {key}"}, timeout=60)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+        return None
+
+    try:
+        return await asyncio.to_thread(_post)
+    except Exception as e:
+        print(f"  [openai error] {e}")
+        return None
+
+
+# ══════════════════════════════════════════
+#  Anthropic-compatible backend
+# ══════════════════════════════════════════
+async def _anthropic_chat(text):
+    url = os.environ.get("CP_AI_ANTHROPIC_URL", "")
+    key = os.environ.get("CP_AI_ANTHROPIC_KEY", "")
+    model = os.environ.get("CP_AI_ANTHROPIC_MODEL", "")
+    if not url or not key or not model:
+        print("  [anthropic] CP_AI_ANTHROPIC_URL, CP_AI_ANTHROPIC_KEY, CP_AI_ANTHROPIC_MODEL required")
+        return None
+
     try:
         import anthropic
-        client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
+        client = anthropic.AsyncAnthropic(api_key=key, base_url=url)
         resp = await client.messages.create(
             model=model,
             max_tokens=256,
             system=_SYSTEM,
-            messages=[{"role": "user", "content": message_text}],
+            messages=[{"role": "user", "content": text}],
         )
         return resp.content[0].text
     except ImportError:
+        print("  [anthropic] pip install anthropic")
         return None
     except Exception as e:
-        print(f"  [api error] {e}")
+        print(f"  [anthropic error] {e}")
         return None
 
 
 async def call_llm(message_text):
-    """Try local Ollama first, then remote API, then echo."""
-    # 1. Local Ollama
-    if await _check_ollama():
+    backend = BACKEND
+    if backend == "ollama":
         print("  [backend: ollama]")
-        reply = await call_ollama(message_text)
-        if reply:
-            return reply
+        reply = await _ollama_chat(message_text)
+    elif backend == "openai":
+        print("  [backend: openai]")
+        reply = await _openai_chat(message_text)
+    elif backend == "anthropic":
+        print("  [backend: anthropic]")
+        reply = await _anthropic_chat(message_text)
+    else:
+        reply = None
 
-    # 2. Remote API
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GLM_API_KEY")
-    if api_key:
-        print("  [backend: remote api]")
-        reply = await call_remote_api(message_text)
-        if reply is not None:
-            return reply
-
-    # 3. Echo fallback
+    if reply:
+        return reply
     return f"[echo] {message_text}"
 
 

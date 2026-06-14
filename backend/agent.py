@@ -126,6 +126,8 @@ async def main():
                         sz = os.path.getsize(OUTBOX)
                     except OSError:
                         sz = 0
+                    if sz < last_size:
+                        last_size = 0
                     if sz > last_size:
                         with open(OUTBOX, "r") as f:
                             f.seek(last_size)

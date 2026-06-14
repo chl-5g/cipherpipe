@@ -41,14 +41,17 @@ async def _ollama_chat(text):
             {"role": "user", "content": text},
         ],
         "stream": False,
-        "options": {"temperature": 0.7, "num_predict": 256},
+        "options": {"temperature": 0.7, "num_predict": 256, "enable_thinking": False},
     }
 
     def _post():
         import requests as req
         r = req.post(f"{url}/api/chat", json=payload, timeout=60)
         if r.status_code == 200:
-            return r.json()["message"]["content"].strip()
+            result = r.json()["message"]["content"].strip()
+            if "</think>" in result:
+                result = result.split("</think>")[-1].strip()
+            return result
         return None
 
     try:

@@ -371,8 +371,11 @@ async def ws_handler(websocket):
                     if peer in LAN_CLIENTS:
                         await LAN_CLIENTS[peer].send(out)
                     else:
-                        encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "typing"}))
-                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]]))
+                        try:
+                            encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "typing"}))
+                            await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]]))
+                        except ValueError:
+                            pass
             elif t == "read_receipt":
                 peer, eid = frame.get("peer", ""), frame.get("event_id", "")
                 if peer and eid:
@@ -380,8 +383,11 @@ async def ws_handler(websocket):
                     if peer in LAN_CLIENTS:
                         await LAN_CLIENTS[peer].send(out)
                     else:
-                        encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "read_receipt", "event_id": eid, "read_at": int(time.time())}))
-                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]]))
+                        try:
+                            encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "read_receipt", "event_id": eid, "read_at": int(time.time())}))
+                            await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)]]))
+                        except ValueError:
+                            pass
             elif t == "reaction":
                 peer, eid, emoji = frame.get("peer",""), frame.get("event_id",""), frame.get("emoji","")
                 if peer and eid and emoji:
@@ -389,9 +395,11 @@ async def ws_handler(websocket):
                     if peer in LAN_CLIENTS:
                         await LAN_CLIENTS[peer].send(out)
                     else:
-                        encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "reaction", "event_id": eid, "emoji": emoji}))
-                        await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)], ["e", eid]]))
-                    # Persist with dedup via unique event_id
+                        try:
+                            encrypted = nip44_encrypt(SK, peer, json.dumps({"type": "reaction", "event_id": eid, "emoji": emoji}))
+                            await nostr_publish(sign_event(SK, 4, encrypted, [["p", to_nostr_pk(peer)], ["e", eid]]))
+                        except ValueError:
+                            pass
                     add_message(f"rxn_{PUBKEY[:12]}_{eid}_{emoji}", peer, emoji, "out", msg_type="reaction")
             elif t == "contacts":
                 await websocket.send(json.dumps({"type": "contacts", "data": list_contacts()}))
@@ -429,7 +437,7 @@ async def queue_to_browsers():
     while True:
         msg = await EVENT_QUEUE.get()
         parsed = msg.get("parsed", {})
-        out = {"type": "msg", "from": msg["pubkey"][:12], "text": msg["text"], "msg_type": msg["msg_type"], "event_id": msg.get("event_id","")}
+        out = {"type": "msg", "from": msg["pubkey"], "text": msg["text"], "msg_type": msg["msg_type"], "event_id": msg.get("event_id","")}
         ptype = parsed.get("type","")
         if ptype in ("file_offer", "file_chunk"):
             result = file_receiver.on_message(parsed, msg["pubkey"])

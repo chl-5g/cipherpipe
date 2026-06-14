@@ -21,9 +21,11 @@ def to_nostr_pk(pk_hex):
 
 def from_nostr_pk(pk_hex):
     """64-char Nostr pubkey → 66-char compressed pubkey (add even-y prefix)."""
-    if len(pk_hex) == 64:
+    if len(pk_hex) == 64 and all(c in "0123456789abcdefABCDEF" for c in pk_hex):
         return "02" + pk_hex
-    return pk_hex
+    if len(pk_hex) == 66 and pk_hex[:2] in ("02", "03"):
+        return pk_hex
+    raise ValueError(f"invalid pubkey format: len={len(pk_hex)}")
 
 def load_or_create_key(keyfile=None):
     if keyfile is None:

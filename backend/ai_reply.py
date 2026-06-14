@@ -180,8 +180,9 @@ async def main():
                 print(f"[收到] {sender[:12]}: {text[:100]}")
                 reply = await call_llm(text)
                 if reply:
+                    entry = json.dumps({"to": sender, "text": reply}, ensure_ascii=False)
                     with open(OUTBOX, "a") as f:
-                        f.write(reply + "\n")
+                        f.write(entry + "\n")
                     print(f"[回复] {reply[:100]}")
 
         if time.time() - last_activity > IDLE_TIMEOUT:

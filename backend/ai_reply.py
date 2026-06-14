@@ -51,6 +51,8 @@ async def _ollama_chat(text):
             result = r.json()["message"]["content"].strip()
             if "</think>" in result:
                 result = result.split("</think>")[-1].strip()
+            elif result.startswith("<think>") and "</think>" not in result:
+                return None  # Partial think — skip
             return result
         return None
 

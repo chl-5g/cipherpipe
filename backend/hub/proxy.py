@@ -59,7 +59,10 @@ async def relay_connect(url, sk):
                     msg = json.loads(raw)
                     if msg[0] == "EVENT" and msg[1] == "cp_sub":
                         event = msg[2]
-                        if not verify_event(event): continue
+                        log_event("relay_event_rcv", id=event.get("id","")[:16], kind=event.get("kind"), pubkey=event.get("pubkey","")[:16])
+                        if not verify_event(event):
+                            log_event("relay_event_bad_sig", id=event.get("id","")[:16])
+                            continue
                         kind = event["kind"]
                         if kind == 0: await _handle_profile(event); continue
                         if kind == 5: await _handle_deletion(event); continue
@@ -72,8 +75,13 @@ async def relay_connect(url, sk):
                                     "text": pt, "msg_type": parsed.get("type", "msg"), "parsed": parsed, "created_at": event["created_at"]})
                                 set_state("last_received_at", event["created_at"])
                                 add_message(event["id"], event["pubkey"], pt, "in", created_at=event["created_at"])
-                            except Exception: pass
-                except Exception: pass
+                                log_event("relay_msg_decrypted", from_pk=event["pubkey"][:16], text=pt[:100])
+                            except Exception as e:
+                                log_event("relay_decrypt_fail", from_pk=event["pubkey"][:16], error=str(e)[:80])
+                    elif msg[0] == "NOTICE":
+                        log_event("relay_notice", message=str(msg)[:200])
+                except Exception:
+                    pass
         except Exception as e:
             RELAY_POOL.pop(url, None)
             logger.warning(f"Relay {url}: {e}")

@@ -7,10 +7,11 @@ DB_PATH = os.path.join(DATA_DIR, "cipherpipe.db")
 
 
 def get_db():
-    db = sqlite3.connect(DB_PATH)
+    db = sqlite3.connect(DB_PATH, timeout=10)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")
+    db.execute("PRAGMA busy_timeout=10000")
     return db
 
 

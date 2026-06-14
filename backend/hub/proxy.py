@@ -54,30 +54,34 @@ async def relay_connect(url, sk):
                 since_ts = min(since_ts, int(last_ts))
             watched = list(WATCHED_PUBKEYS) if WATCHED_PUBKEYS else [pubkey]
             await ws.send(json.dumps(["REQ", "cp_sub", {"kinds": [0, 4, 5, 7, 1059], "#p": watched, "since": since_ts}]))
+            async def _process_event(event):
+                if not verify_event(event):
+                    log_event("relay_event_bad_sig", id=event.get("id","")[:16])
+                    return
+                kind = event["kind"]
+                if kind == 0: await _handle_profile(event); return
+                if kind == 5: await _handle_deletion(event); return
+                if kind == 7: await _handle_reaction(event); return
+                if kind in (4, 1059):
+                    try:
+                        pt = nip44_decrypt(sk, event["pubkey"], event["content"])
+                        parsed = _parse(pt)
+                        await EVENT_QUEUE.put({"event_id": event["id"], "pubkey": event["pubkey"],
+                            "text": pt, "msg_type": parsed.get("type", "msg"), "parsed": parsed, "created_at": event["created_at"]})
+                        set_state("last_received_at", event["created_at"])
+                        add_message(event["id"], event["pubkey"], pt, "in", created_at=event["created_at"])
+                        log_event("relay_msg_decrypted", from_pk=event["pubkey"][:16], text=pt[:100])
+                    except Exception as e:
+                        log_event("relay_decrypt_fail", from_pk=event["pubkey"][:16], error=str(e)[:80])
+
             async for raw in ws:
                 try:
                     msg = json.loads(raw)
                     if msg[0] == "EVENT" and msg[1] == "cp_sub":
                         event = msg[2]
                         log_event("relay_event_rcv", id=event.get("id","")[:16], kind=event.get("kind"), pubkey=event.get("pubkey","")[:16])
-                        if not verify_event(event):
-                            log_event("relay_event_bad_sig", id=event.get("id","")[:16])
-                            continue
-                        kind = event["kind"]
-                        if kind == 0: await _handle_profile(event); continue
-                        if kind == 5: await _handle_deletion(event); continue
-                        if kind == 7: await _handle_reaction(event); continue
-                        if kind in (4, 1059):
-                            try:
-                                pt = nip44_decrypt(sk, event["pubkey"], event["content"])
-                                parsed = _parse(pt)
-                                await EVENT_QUEUE.put({"event_id": event["id"], "pubkey": event["pubkey"],
-                                    "text": pt, "msg_type": parsed.get("type", "msg"), "parsed": parsed, "created_at": event["created_at"]})
-                                set_state("last_received_at", event["created_at"])
-                                add_message(event["id"], event["pubkey"], pt, "in", created_at=event["created_at"])
-                                log_event("relay_msg_decrypted", from_pk=event["pubkey"][:16], text=pt[:100])
-                            except Exception as e:
-                                log_event("relay_decrypt_fail", from_pk=event["pubkey"][:16], error=str(e)[:80])
+                        asyncio.create_task(_process_event(event))
+                        await asyncio.sleep(0)
                     elif msg[0] == "NOTICE":
                         log_event("relay_notice", message=str(msg)[:200])
                 except Exception:

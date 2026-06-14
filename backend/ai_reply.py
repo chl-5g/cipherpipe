@@ -6,6 +6,16 @@ import asyncio, json, os, sys, time
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_DIR)
 
+# Load .env
+_env_path = os.path.join(PROJECT_DIR, ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
 INBOX = os.path.join(PROJECT_DIR, "data", "inbox.jsonl")
 OUTBOX = os.path.join(PROJECT_DIR, "data", "outbox.jsonl")
 IDLE_TIMEOUT = 30  # seconds

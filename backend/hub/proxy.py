@@ -382,8 +382,14 @@ async def ws_handler(websocket):
             elif t == "contacts":
                 await websocket.send(json.dumps({"type": "contacts", "data": list_contacts()}))
             elif t == "create_identity":
-                sk = load_or_create_key()
+                import coincurve
+                sk = coincurve.PrivateKey()
                 await websocket.send(json.dumps({"type":"identity_created","pubkey":sk.public_key.format().hex()}))
+            elif t == "peer_status":
+                pk = frame.get("pubkey", "")
+                if pk:
+                    online = pk in LAN_CLIENTS
+                    await websocket.send(json.dumps({"type":"peer_status","pubkey":pk,"online":online}))
             elif t == "delete_contact":
                 pk = frame.get("pubkey", "")
                 if pk: delete_contact(pk)

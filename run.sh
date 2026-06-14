@@ -2,6 +2,12 @@
 # CipherPipe — Nostr bridge runner
 cd "$(dirname "$0")"
 
+# Auto-install deps if missing
+python3 -c "import websockets, cryptography, structlog, coincurve" 2>/dev/null || {
+    echo "[CipherPipe] Installing dependencies..."
+    pip3 install -r requirements.txt --break-system-packages 2>/dev/null || pip3 install -r requirements.txt
+}
+
 # Load .env
 [ -f .env ] && export $(grep -v '^#' .env | grep -v '^$' | xargs)
 

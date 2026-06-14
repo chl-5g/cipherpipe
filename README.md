@@ -2,7 +2,7 @@
 
 端到端加密数据传输管道。基于 Nostr 协议，无需中心服务器。
 
-任何 client 平等接入，管道不关心谁在用。
+任何 node 平等接入，管道不关心谁在用。
 
 ## 设计哲学
 
@@ -11,7 +11,7 @@
 ### 三个核心约束
 
 1. **服务器零知识** — relay 只转发加密 blob，永不解密。管道不持有明文的任何时刻。
-2. **参与者平等** — 对 relay 来说，所有 client 都是两个公钥在互发加密事件。没有角色区别，只有 senders 和 receivers。
+2. **参与者平等** — 对 relay 来说，所有 node 都是两个公钥在互发加密事件。没有角色区别，只有 senders 和 receivers。
 3. **无单点故障** — 同时连多个 Nostr relay，挂一个自动切另一个。
 
 ### 管道不做什么
@@ -28,18 +28,17 @@
 
 ### 为什么不需要自己的服务器
 
-Nostr 全球有几千个公共 relay。CipherPipe 启动时向所有 relay 开持久 WebSocket，消息即时推送。relay 之间不互相同步，靠客户端向多个 relay 同时发布保证到达。不依赖单一 relay——挂了一个，其他的继续跑。
+Nostr 全球有几千个公共 relay。CipherPipe 启动时向所有 relay 开持久 WebSocket，消息即时推送。relay 之间不互相同步，靠节点向多个 relay 同时发布保证到达。不依赖单一 relay——挂了一个，其他的继续跑。
 
 ## 架构
 
 ```
-任何 client ──WS──→ Hub ──┬── LAN peer（毫秒）
-                          └── Nostr relay（全球可达）
+每个节点 = 前端 + Hub。节点之间对等，通过 LAN 或 Nostr relay 通信。
 ```
 
-- **Hub** 是唯一中间层：路由、持久化、送达确认、消息状态。没有传统意义上的"服务器"。
-- **Client** 是 thin client：只做输入/输出/显示。不处理路由、加密、协议。
-- **消息协议统一**：所有 client 发相同的消息格式，收相同的消息格式。
+- **前端** 只做 I/O：输入/输出/显示，不碰路由、加密、持久化
+- **Hub** 负责路由、NIP-44 加密、持久化、送达确认
+- **消息协议统一**：所有 node 发相同的消息格式，收相同的消息格式。
 
 ## 项目结构
 
@@ -59,16 +58,16 @@ cipherpipe/
 │   ├── file/
 │   │   └── transfer.py        # 文件分片收发 + forward_file()
 │   └── agent.py               # 对端 Agent（收消息/文件，可选自动回复）
-├── frontend/                   # 客户端（thin client）
+├── frontend/                   # 节点（thin node）
 │   ├── web/
 │   │   └── Dashboard.vue      # 浏览器 UI（Vue 3，零加密逻辑）
 │   └── cli/
-│       └── cli.py             # 终端聊天客户端
+│       └── cli.py             # 终端聊天节点
 ├── tests/
 │   └── test_transfer.py       # 消息+文件传输测试（5/5）
 ├── data/                       # 运行时数据
 │   ├── nostr.key              # Hub 身份私钥（自动生成）
-│   ├── *.key                  # 各 client 身份私钥
+│   ├── *.key                  # 各 node 身份私钥
 │   ├── cipherpipe.db          # SQLite 数据库
 │   ├── inbox.jsonl            # Agent 收件箱
 │   ├── outbox.jsonl           # Agent 发件箱
@@ -102,14 +101,14 @@ PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key
 
 ## 消息协议
 
-**客户端 → Hub：**
+**节点 → Hub：**
 ```json
 {"type": "msg", "text": "hello", "to": "<对方公钥>"}
 {"type": "file", "name": "a.pdf", "size": 12345, "to": "<对方公钥>"}
 <binary data>   ← 紧跟在 file header 后面的二进制帧
 ```
 
-**Hub → 客户端：**
+**Hub → 节点：**
 ```json
 {"type": "msg", "id": "...", "from": "<发件人>", "text": "hello", "delivered": true}
 {"type": "read_receipt", "event_id": "..."}
@@ -135,11 +134,11 @@ PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key
 
 统一协议：`{type:'file', name, size, to}` + 二进制 WebSocket frame。
 
-1. 客户端发送 JSON header + 原始文件数据（二进制帧）
+1. 节点发送 JSON header + 原始文件数据（二进制帧）
 2. Hub 接收 → 落盘 → 转发给对端（LAN 直传 / Nostr 分片）
 3. Hub 通知收发双方
 
-客户端零分片、零 base64、零协议知识。超 `CP_FILE_MAX_SIZE`（.env 可配，默认 100MB）直接拒绝。
+节点零分片、零 base64、零协议知识。超 `CP_FILE_MAX_SIZE`（.env 可配，默认 100MB）直接拒绝。
 
 ## CLI 命令
 
@@ -174,7 +173,7 @@ PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key
 
 ## 开发原则
 
-- **客户端只做 I/O**：消息收发和显示，不做路由/加密/状态管理
+- **前端只做 I/O**：消息收发和显示，路由/加密/持久化一律不碰
 - **Hub 处理一切**：路由、持久化、送达确认、消息状态
 - **零硬编码**：配置从 `.env` → config.py 统一加载
 - **TDD**：先写测试 → 看测试失败 → 写代码 → 看测试通过

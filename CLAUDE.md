@@ -5,13 +5,12 @@
 ## 架构
 
 ```
-client ──WS──→ Hub (proxy) ──┬── LAN peer
-                              └── Nostr relay
+节点 = 前端(Dashboard/CLI) + Hub(proxy)
+节点 ←──LAN/relay──→ 对端节点
 ```
 
-- **Hub** 是唯一中间层，处理所有消息路由、持久化、送达确认
-- **Client** 是 thin client，只做 I/O——发消息、显示消息
-- **没有服务器**，只有管道
+- **每个节点 = 前端 + Hub**。前端只做 I/O，Hub 负责路由、加密、持久化
+- **节点之间对等**，通过 LAN 直连或 Nostr relay 通信，没有中心服务器
 
 ## 项目结构
 
@@ -34,7 +33,7 @@ cipherpipe/
 
 ## 原则
 
-- **客户端只做 I/O**：消息收发和显示，不做路由/加密/状态管理
+- **前端只做 I/O**：消息收发和显示，路由/加密/持久化一律不碰
 - **Hub 处理一切**：路由、持久化、送达确认、消息状态
 - **零硬编码**：配置从 `.env` → config.py 统一加载
 - **单端口**：8700 承载 HTTP/WS/LAN peer/文件传输
@@ -49,8 +48,8 @@ PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key  # 启动 agent
 
 ## 消息协议
 
-客户端 → Hub: `{type:'msg', text, to}` / `{type:'file', path, to}`
-Hub → 客户端: `{type:'msg', id, from, text, delivered}`
+节点 → Hub: `{type:'msg', text, to}` / `{type:'file', path, to}`
+Hub → 节点: `{type:'msg', id, from, text, delivered}`
 
 所有中间逻辑（已读、送达、reaction、typing）由 Hub 统一处理。
 

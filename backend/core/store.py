@@ -128,6 +128,7 @@ def list_contacts():
 def delete_contact(pubkey):
     db = get_db()
     db.execute("DELETE FROM contacts WHERE pubkey=?", (pubkey,))
+    db.execute("DELETE FROM messages WHERE pubkey=?", (pubkey,))
     db.commit()
     db.close()
 

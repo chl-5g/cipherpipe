@@ -66,6 +66,12 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
 .btn-file:hover { opacity:0.7; }
 .empty { color:var(--text2); text-align:center; margin-top:60px; line-height:1.8; }
 .empty small { opacity:0.6; }
+.theme-toggle { cursor:pointer; font-size:11px; color:var(--text2); user-select:none; }
+.theme-toggle:hover { color:var(--primary); }
+.toggle-track { display:inline-block; width:32px; height:18px; background:var(--border); border-radius:9px; position:relative; transition:background .2s; vertical-align:middle; }
+.toggle-track.on { background:var(--primary); }
+.toggle-knob { position:absolute; top:2px; left:2px; width:14px; height:14px; background:#fff; border-radius:50%; transition:left .2s; }
+.toggle-track.on .toggle-knob { left:16px; }
 .progress-bar { margin-top:6px; height:14px; background:var(--border); border-radius:3px; overflow:hidden; position:relative; }
 .progress-fill { height:100%; background:var(--primary); border-radius:3px; transition:width .1s; }
 .progress-bar span { position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; line-height:14px; color:#fff; }
@@ -74,13 +80,14 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
 <body>
 <div id="app">
   <div class="sidebar">
-    <h2>CipherPipe</h2>
+    <h2 style="cursor:pointer" @click="currentPeer=null;messages=[]">CipherPipe</h2>
     <div class="sidebar-actions">
-      <button @click="createIdentity">创建身份</button>
-      <button @click="toggleTheme">{{ themeLabel }}</button>
+      <button v-if="!myPubkey" @click="createIdentity">创建身份</button>
     </div>
-    <div v-if="myPubkey" style="padding:6px 10px;font-size:10px;color:var(--text2);word-break:break-all">
-      我的公钥: {{ myPubkey }}
+    <div v-if="myPubkey" style="padding:6px 10px;font-size:10px;color:var(--text2)">
+      <div style="word-break:break-all;margin-bottom:4px">我的公钥：{{ myPubkey }}</div>
+      <a @click.prevent="copyPubkey" style="color:var(--primary);cursor:pointer;margin-right:8px">{{ copied ? '已复制 ✓' : '复制' }}</a>
+      <a @click.prevent="createIdentity" style="color:var(--danger);cursor:pointer">重新生成</a>
     </div>
     <input class="search" v-model="searchQuery" placeholder="搜索消息..." @input="search">
     <div class="peers">
@@ -100,13 +107,15 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
   <div class="main">
     <div class="header">
       <span class="title">{{ chatTitle }}</span>
-      <span :class="['status', statusClass]">{{ statusText }}</span>
+      <span style="flex:1"></span>
+      <span v-if="currentPeer" :class="['status', peerOnline ? 'on' : 'off']" style="margin-right:12px">{{ peerOnline ? '在线' : '离线' }}</span>
+      <span class="theme-toggle" @click="toggleTheme">{{ dark ? '日间模式' : '夜间模式' }}</span>
     </div>
     <div class="typing">{{ typingText }}</div>
     <div class="msgs" ref="msgContainer">
       <div v-if="!currentPeer" class="empty">
         添加联系人公钥开始聊天<br>
-        <small>NIP-44 端到端加密 · Nostr 全球 relay</small>
+        <small>NIP-44 端到端加密 · 去中心化模式 · 数据通过全球 Nostr relay 网络传输，不经过中心服务器</small>
       </div>
       <div v-for="m in messages" :key="m.id"
            :class="['msg', m.dir]"
@@ -127,11 +136,11 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
         <div v-if="m.reactions" class="rx">{{ m.reactions }}</div>
       </div>
     </div>
-    <div class="input-bar">
-      <input v-model="inputText" :disabled="!currentPeer" placeholder="消息..."
+    <div v-if="currentPeer" class="input-bar">
+      <input v-model="inputText" placeholder="消息..."
              @keydown.enter="send" @input="onTyping">
       <button class="btn-file" @click="sendFile" title="发送文件">+</button>
-      <button class="btn-send" @click="send" :disabled="!currentPeer">发送</button>
+      <button class="btn-send" @click="send">发送</button>
     </div>
   </div>
 </div>
@@ -144,12 +153,14 @@ createApp({
     const ws = ref(null);
     const currentPeer = ref(null);
     const myPubkey = ref(localStorage.getItem('cp_my_pubkey') || '');
+    const copied = ref(false);
     const peers = ref(JSON.parse(localStorage.getItem('cp_peers') || '[]').map(p => typeof p === 'string' ? {pubkey:p, petname:''} : p));
     const messages = ref([]);
     const inputText = ref('');
     const searchQuery = ref('');
     const statusText = ref('disconnected');
     const statusClass = ref('off');
+    const peerOnline = ref(false);
     const typingText = ref('');
     const msgContainer = ref(null);
     let typingTimeout = null;
@@ -167,10 +178,11 @@ createApp({
     if (dark.value) document.body.classList.add('dark');
 
     const chatTitle = computed(() => {
-      if (!currentPeer.value) return '选择联系人';
+      if (!currentPeer.value) return '首页';
       const p = peers.value.find(x => x.pubkey === currentPeer.value);
       return p && p.petname ? p.petname : currentPeer.value.slice(0,12) + '...';
     });
+    const isChatOpen = computed(() => !!currentPeer.value);
 
     function connect() {
       if (ws.value) ws.value.close();
@@ -197,6 +209,10 @@ createApp({
           return;
         }
         const msg = JSON.parse(e.data);
+        if (msg.type === 'peer_status') {
+          peerOnline.value = msg.online;
+          return;
+        }
         if (msg.type === 'identity_created') {
           myPubkey.value = msg.pubkey;
           localStorage.setItem('cp_my_pubkey', msg.pubkey);
@@ -291,7 +307,13 @@ createApp({
 
     function createIdentity() {
       if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return;
+      copied.value = false;
       ws.value.send(JSON.stringify({type:'create_identity'}));
+    }
+
+    function copyPubkey() {
+      navigator.clipboard.writeText(myPubkey.value);
+      copied.value = true;
     }
 
     function addMsg(from, text, dir, eventId, prepend = false, delivered = false) {
@@ -366,6 +388,9 @@ createApp({
       peers.value = peers.value.filter(p => p.pubkey !== pubkey);
       if (currentPeer.value === pubkey) currentPeer.value = null;
       savePeers();
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify({type:'delete_contact', pubkey}));
+      }
     }
 
     function switchPeer(pubkey) {
@@ -374,8 +399,10 @@ createApp({
       typingText.value = '';
       isSearching = false;
       searchQuery.value = '';
+      peerOnline.value = false;
       if (ws.value && ws.value.readyState === WebSocket.OPEN) {
         ws.value.send(JSON.stringify({type:'history', peer: pubkey, limit: 50}));
+        ws.value.send(JSON.stringify({type:'peer_status', pubkey}));
       }
     }
 
@@ -411,9 +438,9 @@ createApp({
     });
 
     return {
-      currentPeer, myPubkey, peers, messages, inputText, searchQuery, statusText, statusClass,
-      typingText, chatTitle, msgContainer, themeLabel, toggleTheme,
-      send, sendFile, onTyping, react, delMsg, addPeer, delPeer, switchPeer, search, createIdentity
+      currentPeer, myPubkey, copied, dark, peers, messages, inputText, searchQuery, statusText, statusClass,
+      typingText, chatTitle, isChatOpen, msgContainer, themeLabel, toggleTheme,
+      send, sendFile, onTyping, react, delMsg, addPeer, delPeer, switchPeer, search, createIdentity, copyPubkey
     };
   }
 }).mount('#app');

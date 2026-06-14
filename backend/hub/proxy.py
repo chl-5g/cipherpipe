@@ -11,7 +11,7 @@ from websockets.http11 import Response as HTTPResponse
 from websockets.datastructures import Headers
 
 from backend.core.crypto import load_or_create_key, sign_event, verify_event, nip44_encrypt, nip44_decrypt, to_nostr_pk
-from backend.core.store import init_db, add_message, get_messages, search_messages, upsert_contact, list_contacts, delete_contact, get_state, set_state, mark_delivered
+from backend.core.store import init_db, add_message, get_messages, get_recent_messages, search_messages, upsert_contact, list_contacts, delete_contact, get_state, set_state, mark_delivered
 from backend.network.relay import load_relays, select_best_relays
 from backend.core.config import PORT, RELAYS as DEFAULT_RELAYS, KEY_FILE, PROJECT_DIR, FILE_MAX_SIZE
 from backend.file.transfer import FileReceiver, make_file_offer, ACTIVE_TOKENS, DOWNLOAD_DIR, forward_file
@@ -185,6 +185,13 @@ async def ws_handler(websocket):
                 log_event("lan_peer_joined", pubkey=peer_pubkey[:12])
                 if new_pubkey:
                     await resubscribe_all()
+                # Push recent messages from DB (catches events that arrived before agent connected)
+                recent = get_recent_messages(limit=20)
+                for row in recent:
+                    try:
+                        await websocket.send(json.dumps({"type": "msg", "id": row.get("event_id",""), "from": row["pubkey"][:12], "text": row["content"], "delivered": True}))
+                    except Exception:
+                        break
                 continue
 
             # ── LAN peer → browser relay ──

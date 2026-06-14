@@ -110,6 +110,13 @@ def get_messages(pubkey, limit=50, before=None):
     return [dict(r) for r in reversed(rows)]
 
 
+def get_recent_messages(limit=20):
+    db = get_db()
+    rows = db.execute("SELECT * FROM messages ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    db.close()
+    return [dict(r) for r in reversed(rows)]
+
+
 def search_messages(query, limit=50):
     db = get_db()
     rows = db.execute(

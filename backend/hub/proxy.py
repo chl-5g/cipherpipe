@@ -164,7 +164,6 @@ async def ws_handler(websocket):
                 if target in LAN_CLIENTS:
                     out = json.dumps({"type": "msg", "id": eid, "from": peer_pubkey, "text": text, "delivered": True})
                     await LAN_CLIENTS[target].send(out)
-                    # Echo back to sender
                     await websocket.send(json.dumps({"type": "msg", "id": eid, "from": "me", "text": text, "delivered": True}))
                     add_message(eid, target, text, "in", delivered=1)
                 elif target == PUBKEY:
@@ -173,6 +172,13 @@ async def ws_handler(websocket):
                         try: await bw.send(out)
                         except Exception: BROWSERS.discard(bw)
                     add_message(eid, peer_pubkey, text, "in", delivered=1)
+                else:
+                    encrypted = nip44_encrypt(SK, target, text)
+                    event = sign_event(SK, 4, encrypted, [["p", target]])
+                    await nostr_publish(event)
+                    await websocket.send(json.dumps({"type": "msg", "id": event["id"], "from": "me", "text": text, "delivered": False}))
+                    add_message(event["id"], target, text, "out")
+                    log_event("msg_sent", to=target[:12])
                 continue
 
             # ── Unified file: JSON header → binary chunks → file_end ──
@@ -391,6 +397,9 @@ async def queue_to_browsers():
         for bw in list(BROWSERS):
             try: await bw.send(out_json)
             except Exception: BROWSERS.discard(bw)
+        for pk, ws in list(LAN_CLIENTS.items()):
+            try: await ws.send(out_json)
+            except Exception: LAN_CLIENTS.pop(pk, None)
 
 # ── HTTP ──
 async def process_request(c, r):

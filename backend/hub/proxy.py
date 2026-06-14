@@ -34,6 +34,7 @@ RELAY_POOL = {}
 EVENT_QUEUE = asyncio.Queue()
 LAN_CLIENTS = {}
 BROWSERS = set()
+WATCHED_PUBKEYS = set()
 file_receiver = FileReceiver(auto_accept=False)
 SK = None
 PUBKEY = None
@@ -51,7 +52,8 @@ async def relay_connect(url, sk):
             last_ts = get_state("last_received_at")
             if last_ts:
                 since_ts = min(since_ts, int(last_ts))
-            await ws.send(json.dumps(["REQ", "cp_sub", {"kinds": [0, 4, 5, 7, 1059], "#p": [pubkey], "since": since_ts}]))
+            watched = list(WATCHED_PUBKEYS) if WATCHED_PUBKEYS else [pubkey]
+            await ws.send(json.dumps(["REQ", "cp_sub", {"kinds": [0, 4, 5, 7, 1059], "#p": watched, "since": since_ts}]))
             async for raw in ws:
                 try:
                     msg = json.loads(raw)
@@ -121,6 +123,18 @@ async def nostr_publish(event):
         try: await ws.send(msg)
         except Exception: RELAY_POOL.pop(url, None)
 
+async def resubscribe_all():
+    """Re-send REQ to all relays with current WATCHED_PUBKEYS."""
+    since_ts = max(int(time.time()) - 86400, 0)
+    last_ts = get_state("last_received_at")
+    if last_ts:
+        since_ts = min(since_ts, int(last_ts))
+    watched = list(WATCHED_PUBKEYS)
+    req = json.dumps(["REQ", "cp_sub", {"kinds": [0, 4, 5, 7, 1059], "#p": watched, "since": since_ts}])
+    for url, ws in list(RELAY_POOL.items()):
+        try: await ws.send(req)
+        except Exception: RELAY_POOL.pop(url, None)
+
 # ── Unified WebSocket handler (browser + LAN + file xfer, all on :8701) ──
 async def ws_handler(websocket):
     is_browser = True  # distinguish browser from LAN peer
@@ -151,9 +165,13 @@ async def ws_handler(websocket):
                 is_browser = False
                 peer_pubkey = frame.get("pubkey", "")
                 LAN_CLIENTS[peer_pubkey] = websocket
-                BROWSERS.discard(websocket)  # Not a browser anymore
+                BROWSERS.discard(websocket)
+                new_pubkey = peer_pubkey not in WATCHED_PUBKEYS
+                WATCHED_PUBKEYS.add(peer_pubkey)
                 await websocket.send(json.dumps({"type": "lan_hello_ack", "pubkey": PUBKEY}))
                 log_event("lan_peer_joined", pubkey=peer_pubkey[:12])
+                if new_pubkey:
+                    await resubscribe_all()
                 continue
 
             # ── LAN peer → browser relay ──
@@ -413,9 +431,10 @@ async def process_request(c, r):
 
 # ── Main ──
 async def main():
-    global SK, PUBKEY
+    global SK, PUBKEY, WATCHED_PUBKEYS
     SK = load_or_create_key(KEY_FILE)
     PUBKEY = SK.public_key.format().hex()
+    WATCHED_PUBKEYS = {PUBKEY}
     init_db()
     logger.info(f"CipherPipe :{PORT}  |  Identity: {PUBKEY[:16]}...")
     log_event("server_start", port=PORT)

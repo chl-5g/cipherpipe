@@ -150,13 +150,21 @@ if __name__ == "__main__":
     chat_parser.add_argument("--keyfile", default=DEFAULT_KEYFILE, help="Key file")
 
     auto_parser = sub.add_parser("autoreply", help="Start AI auto-reply bot (monitors inbox, replies via LLM)")
+    auto_parser.add_argument("--backend", default="ollama", choices=["ollama", "openai", "anthropic"], help="LLM backend")
+    auto_parser.add_argument("--url", help="LLM API URL")
+    auto_parser.add_argument("--model", help="Model name")
 
     args, unknown = parser.parse_known_args()
 
     if args.command == "autoreply":
         from backend import ai_reply
         try:
-            asyncio.run(ai_reply.main(persist=True))
+            asyncio.run(ai_reply.main(
+                persist=True,
+                backend=args.backend,
+                url=args.url,
+                model=args.model,
+            ))
         except KeyboardInterrupt:
             print()
     elif args.command == "chat":

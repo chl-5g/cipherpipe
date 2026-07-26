@@ -139,7 +139,26 @@ async def call_llm(message_text):
     return f"[echo] {message_text}"
 
 
-async def main(persist=False):
+async def main(persist=False, *, backend=None, url=None, model=None):
+    global BACKEND
+    if backend:
+        import backend.core.config as _cfg
+        os.environ["CP_AI_BACKEND"] = backend
+        _cfg.AI_BACKEND = backend
+        BACKEND = backend
+    if url and backend == "ollama":
+        os.environ["CP_AI_OLLAMA_URL"] = url
+        import backend.core.config as _cfg2
+        _cfg2.AI_OLLAMA_URL = url
+    if model and backend == "ollama":
+        os.environ["CP_AI_OLLAMA_MODEL"] = model
+        import backend.core.config as _cfg3
+        _cfg3.AI_OLLAMA_MODEL = model
+    if url and backend == "openai":
+        os.environ["CP_AI_OPENAI_URL"] = url
+    if model and backend == "openai":
+        os.environ["CP_AI_OPENAI_MODEL"] = model
+
     # Start from end of existing inbox
     try:
         with open(INBOX, "r") as f:

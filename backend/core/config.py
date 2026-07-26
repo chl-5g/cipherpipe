@@ -22,3 +22,14 @@ if not RELAYS:
 KEY_FILE = os.path.join(DATA_DIR, os.environ.get("CP_KEY_FILE", "nostr.key"))
 RELAY_CONFIG = os.path.expanduser(os.environ.get("CP_RELAY_CONFIG", os.path.join(DATA_DIR, "relays.json")))
 FILE_MAX_SIZE = int(os.environ.get("CP_FILE_MAX_SIZE", str(100 * 1024 * 1024)))
+
+# ── AI auto-reply (ai_reply.py) ──
+AI_BACKEND = os.environ.get("CP_AI_BACKEND", "")
+AI_OLLAMA_URL = os.environ.get("CP_AI_OLLAMA_URL", "")
+AI_OLLAMA_MODEL = os.environ.get("CP_AI_OLLAMA_MODEL", "")
+AI_OPENAI_URL = os.environ.get("CP_AI_OPENAI_URL", "")
+AI_OPENAI_KEY = os.environ.get("CP_AI_OPENAI_KEY", "")
+AI_OPENAI_MODEL = os.environ.get("CP_AI_OPENAI_MODEL", "")
+AI_ANTHROPIC_URL = os.environ.get("CP_AI_ANTHROPIC_URL", "")
+AI_ANTHROPIC_KEY = os.environ.get("CP_AI_ANTHROPIC_KEY", "")
+AI_ANTHROPIC_MODEL = os.environ.get("CP_AI_ANTHROPIC_MODEL", "")

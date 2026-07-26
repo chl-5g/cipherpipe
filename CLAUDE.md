@@ -17,15 +17,15 @@
 ```
 cipherpipe/
 ├── backend/
-│   ├── hub/          proxy.py (入口) + router.py (PeerRouter)
-│   ├── core/         config.py + crypto.py + store.py
-│   ├── network/      relay.py + lan.py
-│   ├── file/         transfer.py
+│   ├── hub/          proxy.py (入口/分发) + handlers.py (消息分发表) + session.py (连接状态)
+│   ├── core/         config.py + crypto.py (E2E) + store.py
+│   ├── network/      relay.py (relay 池 + RTT 选优)
+│   ├── file/         transfer.py (统一流式协议 + safe_download_path)
 │   └── agent.py      对端 agent
 ├── frontend/
 │   ├── web/          Dashboard.vue (浏览器)
 │   └── cli/          cli.py (终端)
-├── run.sh            # 启动 Hub
+├── run.sh            # 启动 Hub（端口 <1024 自动 sudo）
 ├── cipherchat        # 终端聊天快捷入口
 ├── data/             # 运行时数据
 └── logs/
@@ -36,7 +36,7 @@ cipherpipe/
 - **前端只做 I/O**：消息收发和显示，路由/加密/持久化一律不碰
 - **Hub 处理一切**：路由、持久化、送达确认、消息状态
 - **零硬编码**：配置从 `.env` → config.py 统一加载
-- **单端口**：8700 承载 HTTP/WS/LAN peer/文件传输
+- **单端口**：80 承载 HTTP/WS/LAN peer/文件传输（run.sh 自动 sudo）
 - **TDD**：先写测试 → 看测试失败 → 写代码 → 看测试通过。不通过测试验证不做任何实现
 
 ## 启动

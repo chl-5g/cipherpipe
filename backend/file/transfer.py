@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """File transfer — Nostr signal + chunked DM. LAN direct file chunks go over main WS."""
 import asyncio, json, os, uuid, hashlib, base64, structlog
-from backend.core.crypto import nip44_encrypt, sign_event
+from backend.core.crypto import e2e_encrypt, sign_event
 from backend.core.config import DATA_DIR
 
 logger = structlog.get_logger("cipherpipe.file")
@@ -9,24 +9,14 @@ NOSTR_CHUNK_SIZE = 32 * 1024
 DOWNLOAD_DIR = os.path.join(DATA_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-ACTIVE_TOKENS = {}
-
-
-def make_file_offer(filepath, lan_available=False):
-    token = uuid.uuid4().hex
-    with open(filepath, "rb") as f:
-        data = f.read()
-    sha = hashlib.sha256(data).hexdigest()
-    ACTIVE_TOKENS[token] = {"name": os.path.basename(filepath), "size": len(data), "sha256": sha}
-    return {
-        "type": "file_offer",
-        "file_id": uuid.uuid4().hex,
-        "name": os.path.basename(filepath),
-        "size": len(data),
-        "method": "lan_direct" if lan_available else "nostr_chunked",
-        "token": token,
-        "sha256": sha,
-    }
+def safe_download_path(name, data_dir=DOWNLOAD_DIR):
+    """Sanitize a peer-supplied filename into a safe path under data_dir."""
+    # Treat both / and \ as separators (Windows-style traversal on POSIX)
+    name = name.replace("\\", "/")
+    name = os.path.basename(name).replace("\x00", "").strip()
+    if not name or name in (".", ".."):
+        name = f"file_{uuid.uuid4().hex[:8]}"
+    return os.path.join(data_dir, name)
 
 
 async def send_file_chunked(sk, peer_pubkey, filepath, publish_fn):
@@ -42,7 +32,7 @@ async def send_file_chunked(sk, peer_pubkey, filepath, publish_fn):
             "name": os.path.basename(filepath), "data": base64.b64encode(chunk).decode(),
             "sha256": sha if i == total - 1 else None,
         })
-        encrypted = nip44_encrypt(sk, peer_pubkey, msg)
+        encrypted = e2e_encrypt(sk, peer_pubkey, msg)
         await publish_fn(sign_event(sk, 4, encrypted, [["p", peer_pubkey]]))
         await asyncio.sleep(0.05)
     logger.info("File sent via Nostr chunks", name=os.path.basename(filepath), chunks=total)
@@ -96,7 +86,7 @@ class FileReceiver:
         if hashlib.sha256(data).hexdigest() != expected_sha256:
             logger.error("File checksum mismatch", file_id=fid)
             return None
-        path = os.path.join(self.dir, info["name"])
+        path = safe_download_path(info["name"], self.dir)
         with open(path, "wb") as f:
             f.write(data)
         logger.info("File assembled", name=info["name"], size=len(data))

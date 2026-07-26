@@ -46,17 +46,17 @@ Nostr 全球有几千个公共 relay。CipherPipe 启动时向所有 relay 开�
 cipherpipe/
 ├── backend/                    # Hub 中间层
 │   ├── hub/
-│   │   ├── proxy.py           # WebSocket/HTTP 入口，消息路由核心
-│   │   └── router.py          # PeerRouter — LAN/relay 路由策略
+│   │   ├── proxy.py           # 入口：relay 池 + WS 分发 + HTTP
+│   │   ├── handlers.py        # 消息分发表（每种 type 一个 handler）
+│   │   └── session.py         # ClientSession — 单连接状态
 │   ├── core/
-│   │   ├── config.py          # .env 配置加载
-│   │   ├── crypto.py          # NIP-44 加解密 + BIP-340 签名
-│   │   └── store.py           # SQLite 持久化（消息/联系人/状态）
+│   │   ├── config.py          # .env 配置加载（含 AI 配置）
+│   │   ├── crypto.py          # E2E 加解密（自有格式）+ BIP-340 签名
+│   │   └── store.py           # SQLite 持久化（消息/联系人/状态/FTS）
 │   ├── network/
-│   │   ├── relay.py           # Nostr relay 连接池管理
-│   │   └── lan.py             # mDNS LAN 节点发现
+│   │   └── relay.py           # Nostr relay 连接池 + RTT 选优
 │   ├── file/
-│   │   └── transfer.py        # 文件分片收发 + forward_file()
+│   │   └── transfer.py        # 文件收发 + safe_download_path()
 │   └── agent.py               # 对端 Agent（收消息/文件，可选自动回复）
 ├── frontend/                   # 节点（thin node）
 │   ├── web/
@@ -155,10 +155,11 @@ PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key
 
 ## 加密
 
-- 协议：NIP-44（XChaCha20-Poly1305）
+- 协议：CipherPipe 自有 E2E 格式（ECDH + HKDF + ChaCha20-Poly1305），经 Nostr kind-4 事件传输
 - 密钥交换：ECDH（secp256k1）
 - 签名：BIP-340 Schnorr
 - 每条消息独立随机 nonce，防重放
+- 注意：与 NIP-44 v2 不互通，仅 CipherPipe 节点间可解密
 
 ## 配置
 
@@ -166,7 +167,7 @@ PYTHONPATH=. python3 backend/agent.py --keyfile data/claude.key
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `CP_PORT` | 8700 | Hub 端口 |
+| `CP_PORT` | 80 | Hub 端口（<1024 需 root，run.sh 自动用 sudo） |
 | `CP_RELAYS` | damus.io, nos.lol, nostr.band | Nostr relay 列表 |
 | `CP_KEY_FILE` | nostr.key | Hub 身份私钥 |
 | `CP_FILE_MAX_SIZE` | 104857600 (100MB) | 文件上传上限 |

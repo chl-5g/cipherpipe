@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""NIP-44 ChaCha20-Poly1305 + BIP-340 Schnorr for CipherPipe."""
+"""CipherPipe E2E encryption: ECDH(secp256k1) + HKDF + ChaCha20-Poly1305,
+with BIP-340 Schnorr event signatures.
+
+NOTE: e2e_encrypt/e2e_decrypt are CipherPipe's own E2E format carried over
+Nostr relays (kind-4 events). They are NOT wire-compatible with NIP-44 v2 —
+only CipherPipe nodes can decrypt them. The nostr event envelope (id/sig/kind)
+follows NIP-01 so relays accept and route the events normally.
+"""
 import json, time, hashlib, secrets, base64, os
 
 import coincurve
@@ -68,7 +75,7 @@ def _ec_pub(h):
     return ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), bytes.fromhex(h))
 
 
-def nip44_encrypt(sk, to_pub, text):
+def e2e_encrypt(sk, to_pub, text):
     shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_nostr_pk(to_pub)))
     key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
     nonce = secrets.token_bytes(12)
@@ -76,8 +83,13 @@ def nip44_encrypt(sk, to_pub, text):
     return base64.b64encode(nonce + ct).decode()
 
 
-def nip44_decrypt(sk, from_pub, blob):
+def e2e_decrypt(sk, from_pub, blob):
     shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_nostr_pk(from_pub)))
     key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
     payload = base64.b64decode(blob)
     return ChaCha20Poly1305(key).decrypt(payload[:12], payload[12:], None).decode()
+
+
+# Backwards-compatible aliases (deprecated names)
+nip44_encrypt = e2e_encrypt
+nip44_decrypt = e2e_decrypt

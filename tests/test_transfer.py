@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Test CipherPipe message and file transfer."""
-import asyncio, json, os, sys, subprocess, time, signal, tempfile
+import asyncio, json, os, sys, subprocess, time, signal, socket, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+os.environ["CP_PORT"] = "18700"  # tests must not bind privileged/production port
 
 import websockets
 from backend.core.crypto import load_or_create_key
@@ -15,15 +17,27 @@ PROXY_SCRIPT = os.path.join(PROJECT_DIR, "backend", "hub", "proxy.py")
 class TestTransfer:
     @classmethod
     def setup_class(cls):
-        # Start proxy
+        # Start proxy on a test-specific port
         env = os.environ.copy()
         env["PYTHONPATH"] = PROJECT_DIR
+        env["CP_PORT"] = str(PORT)
         cls.proxy = subprocess.Popen(
             [sys.executable, PROXY_SCRIPT],
             cwd=PROJECT_DIR, env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        time.sleep(3)
+        # Wait until the WS port accepts connections (relay probing can take >5s)
+        for _ in range(60):
+            try:
+                s = socket.create_connection(("127.0.0.1", PORT), timeout=0.5)
+                s.close()
+                break
+            except OSError:
+                if cls.proxy.poll() is not None:
+                    raise RuntimeError("proxy exited during startup")
+                time.sleep(0.5)
+        else:
+            raise RuntimeError("proxy did not start listening in time")
 
     @classmethod
     def teardown_class(cls):
@@ -31,7 +45,7 @@ class TestTransfer:
         cls.proxy.wait()
 
     async def _client(self, keyfile=None):
-        """Connect a client, send lan_hello, return ws + pubkey."""
+        """Connect a client, send lan_hello, drain history push, return ws + pubkey."""
         sk = load_or_create_key(keyfile)
         pubkey = sk.public_key.format().hex()
         ws = await websockets.connect(f"ws://localhost:{PORT}", proxy=None)
@@ -39,6 +53,12 @@ class TestTransfer:
         await ws.send(json.dumps({"type": "lan_hello", "pubkey": pubkey}))
         ack = await asyncio.wait_for(ws.recv(), 5)
         assert json.loads(ack)["type"] == "lan_hello_ack"
+        # Drain history messages pushed after lan_hello (from DB)
+        try:
+            while True:
+                await asyncio.wait_for(ws.recv(), 0.2)
+        except asyncio.TimeoutError:
+            pass
         return ws, pubkey
 
     async def test_msg_send_receive(self):

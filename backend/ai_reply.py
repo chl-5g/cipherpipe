@@ -6,31 +6,23 @@ import asyncio, json, os, sys, time
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_DIR)
 
-# Load .env
-_env_path = os.path.join(PROJECT_DIR, ".env")
-if os.path.exists(_env_path):
-    with open(_env_path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
+from backend.core import config
 
-INBOX = os.path.join(PROJECT_DIR, "data", "inbox.jsonl")
-OUTBOX = os.path.join(PROJECT_DIR, "data", "outbox.jsonl")
+INBOX = os.path.join(config.DATA_DIR, "inbox.jsonl")
+OUTBOX = os.path.join(config.DATA_DIR, "outbox.jsonl")
 IDLE_TIMEOUT = 30  # seconds
 
 _SYSTEM = "你是 CipherPipe 的 AI 助手。简洁回复，不超过三句话。"
 
-BACKEND = os.environ.get("CP_AI_BACKEND", "")
+BACKEND = config.AI_BACKEND
 
 
 # ══════════════════════════════════════════
 #  Ollama backend
 # ══════════════════════════════════════════
 async def _ollama_chat(text):
-    url = os.environ.get("CP_AI_OLLAMA_URL", "")
-    model = os.environ.get("CP_AI_OLLAMA_MODEL", "")
+    url = config.AI_OLLAMA_URL
+    model = config.AI_OLLAMA_MODEL
     if not url or not model:
         print("  [ollama] CP_AI_OLLAMA_URL and CP_AI_OLLAMA_MODEL required")
         return None
@@ -67,9 +59,9 @@ async def _ollama_chat(text):
 #  OpenAI-compatible backend
 # ══════════════════════════════════════════
 async def _openai_chat(text):
-    url = os.environ.get("CP_AI_OPENAI_URL", "")
-    key = os.environ.get("CP_AI_OPENAI_KEY", "")
-    model = os.environ.get("CP_AI_OPENAI_MODEL", "")
+    url = config.AI_OPENAI_URL
+    key = config.AI_OPENAI_KEY
+    model = config.AI_OPENAI_MODEL
     if not url or not key or not model:
         print("  [openai] CP_AI_OPENAI_URL, CP_AI_OPENAI_KEY, CP_AI_OPENAI_MODEL required")
         return None
@@ -103,9 +95,9 @@ async def _openai_chat(text):
 #  Anthropic-compatible backend
 # ══════════════════════════════════════════
 async def _anthropic_chat(text):
-    url = os.environ.get("CP_AI_ANTHROPIC_URL", "")
-    key = os.environ.get("CP_AI_ANTHROPIC_KEY", "")
-    model = os.environ.get("CP_AI_ANTHROPIC_MODEL", "")
+    url = config.AI_ANTHROPIC_URL
+    key = config.AI_ANTHROPIC_KEY
+    model = config.AI_ANTHROPIC_MODEL
     if not url or not key or not model:
         print("  [anthropic] CP_AI_ANTHROPIC_URL, CP_AI_ANTHROPIC_KEY, CP_AI_ANTHROPIC_MODEL required")
         return None

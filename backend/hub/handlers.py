@@ -115,7 +115,7 @@ async def on_lan_hello(frame, sess, ctx):
 @handler("msg")
 async def on_msg(frame, sess, ctx):
     text = frame.get("text", "")
-    peer = frame.get("to", "")
+    peer = ctx._resolve_peer(frame.get("to", ""))
     if not text or not peer:
         return
 

@@ -203,12 +203,14 @@ async def queue_to_browsers():
         elif ptype == "typing":
             out["type"] = "typing"
         out_json = json.dumps(out)
+        own_pk = to_nostr_pk(PUBKEY)
         for bw in list(BROWSERS):
             try: await bw.send(out_json)
             except Exception: BROWSERS.discard(bw)
-        for pk, ws in list(LAN_CLIENTS.items()):
-            try: await ws.send(out_json)
-            except Exception: LAN_CLIENTS.pop(pk, None)
+        if msg["pubkey"] != own_pk:
+            for pk, ws in list(LAN_CLIENTS.items()):
+                try: await ws.send(out_json)
+                except Exception: LAN_CLIENTS.pop(pk, None)
 
 # ── HTTP ──
 async def process_request(c, r):

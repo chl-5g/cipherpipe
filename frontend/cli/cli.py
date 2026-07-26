@@ -140,7 +140,34 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print()
+    import argparse
+    parser = argparse.ArgumentParser(description="CipherPipe CLI")
+    sub = parser.add_subparsers(dest="command")
+
+    chat_parser = sub.add_parser("chat", help="Start terminal chat client")
+    chat_parser.add_argument("--peer", help="Peer pubkey")
+    chat_parser.add_argument("--connect-lan", help="Proxy address")
+    chat_parser.add_argument("--keyfile", default=DEFAULT_KEYFILE, help="Key file")
+
+    auto_parser = sub.add_parser("autoreply", help="Start AI auto-reply bot (monitors inbox, replies via LLM)")
+
+    args, unknown = parser.parse_known_args()
+
+    if args.command == "autoreply":
+        from backend import ai_reply
+        try:
+            asyncio.run(ai_reply.main(persist=True))
+        except KeyboardInterrupt:
+            print()
+    elif args.command == "chat":
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print()
+    else:
+        # Backward compat: treat as chat with optional flags
+        sys.argv = [sys.argv[0]] + unknown
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print()

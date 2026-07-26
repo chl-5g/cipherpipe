@@ -139,7 +139,7 @@ async def call_llm(message_text):
     return f"[echo] {message_text}"
 
 
-async def main():
+async def main(persist=False):
     # Start from end of existing inbox
     try:
         with open(INBOX, "r") as f:
@@ -182,7 +182,7 @@ async def main():
                         f.write(entry + "\n")
                     print(f"[回复] {reply[:100]}")
 
-        if time.time() - last_activity > IDLE_TIMEOUT:
+        if not persist and time.time() - last_activity > IDLE_TIMEOUT:
             print("[超时] 30秒无新消息，退出")
             break
 
@@ -190,4 +190,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--persist", action="store_true", help="Run forever, don't exit on idle")
+    args = parser.parse_args()
+    asyncio.run(main(persist=args.persist))

@@ -8,96 +8,155 @@
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 :root {
-  --bg: #fff; --bg2: #f8f9fa; --border: #dee2e6;
-  --text: #333; --text2: #868e96; --primary: #1f6feb;
-  --msg-in: #f1f3f5; --msg-out: #dbeafe;
-  --hover: #e9ecef; --danger: #e03131; --success: #2f9e44;
+  --bg: #f6f7f9; --bg2: #ffffff; --bg3: #f0f1f4; --border: #e4e6eb;
+  --text: #1c1e21; --text2: #8a8d91; --primary: #4f7cff; --primary2: #3b63e0;
+  --msg-in: #ffffff; --msg-out: linear-gradient(135deg,#4f7cff,#3b63e0);
+  --hover: #eceef1; --danger: #e5484d; --success: #30a46c;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+  --radius: 14px;
 }
 body.dark {
-  --bg: #0d1117; --bg2: #161b22; --border: #30363d;
-  --text: #c9d1d9; --text2: #8b949e; --primary: #58a6ff;
-  --msg-in: #1c2128; --msg-out: #1f6feb22;
-  --hover: #1c2128; --danger: #f85149; --success: #3fb950;
+  --bg: #0e1013; --bg2: #16191f; --bg3: #1c2027; --border: #2a2f38;
+  --text: #e7e9ec; --text2: #7d828c; --primary: #6b8cff; --primary2: #4f7cff;
+  --msg-in: #1c2027; --msg-out: linear-gradient(135deg,#4f7cff,#3b63e0);
+  --hover: #22262e; --danger: #f2555a; --success: #3dd68c;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.3);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.25);
 }
-body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,BlinkMacSystemFont,monospace; height:100vh; }
+body { background:var(--bg); color:var(--text); font:14px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif; height:100vh; -webkit-font-smoothing:antialiased; }
 #app { display:flex; height:100vh; }
-.sidebar { width:220px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; }
-.sidebar h2 { padding:14px 16px 10px; font-size:16px; color:var(--primary); }
-.sidebar-actions { padding:0 10px 8px; display:flex; gap:4px; }
-.sidebar-actions button { flex:1; padding:5px; border:1px solid var(--border); border-radius:4px; background:var(--bg2); color:var(--text2); font-size:10px; cursor:pointer; }
-.sidebar-actions button:hover { background:var(--hover); }
-.search { margin:6px 10px; padding:6px 10px; border-radius:5px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:12px; font-family:inherit; }
-.search:focus { outline:none; border-color:var(--primary); }
-.peers { flex:1; overflow-y:auto; padding:6px; }
-.peer { padding:8px 10px; border-radius:5px; cursor:pointer; font-size:12px; display:flex; justify-content:space-between; align-items:center; }
+
+/* ── Sidebar ── */
+.sidebar { width:280px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; }
+.brand { padding:20px 20px 14px; display:flex; align-items:center; gap:10px; cursor:pointer; }
+.brand-logo { width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg,#4f7cff,#3b63e0); display:flex; align-items:center; justify-content:center; color:#fff; font-size:17px; font-weight:700; box-shadow:0 4px 12px rgba(79,124,255,.35); }
+.brand-name { font-size:17px; font-weight:700; letter-spacing:-.3px; }
+.brand-tag { font-size:10px; color:var(--text2); margin-top:-2px; }
+.sidebar-actions { padding:0 16px 10px; }
+.sidebar-actions button { width:100%; padding:9px; border:1px solid var(--border); border-radius:10px; background:var(--bg3); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; transition:all .15s; }
+.sidebar-actions button:hover { background:var(--hover); transform:translateY(-1px); }
+.identity { margin:0 16px 12px; padding:12px; background:var(--bg3); border-radius:12px; }
+.identity-label { font-size:10px; color:var(--text2); text-transform:uppercase; letter-spacing:.6px; margin-bottom:5px; font-weight:600; }
+.identity-pk { font-size:10.5px; font-family:"SF Mono",Menlo,monospace; word-break:break-all; color:var(--text); line-height:1.5; opacity:.85; }
+.identity-actions { margin-top:8px; display:flex; gap:12px; }
+.identity-actions a { font-size:11px; color:var(--primary); cursor:pointer; font-weight:600; text-decoration:none; }
+.identity-actions a:hover { text-decoration:underline; }
+.identity-actions a.danger { color:var(--danger); }
+.search-wrap { padding:0 16px 10px; position:relative; }
+.search { width:100%; padding:9px 12px 9px 32px; border-radius:10px; border:1px solid var(--border); background:var(--bg3); color:var(--text); font-size:12.5px; font-family:inherit; transition:all .15s; }
+.search:focus { outline:none; border-color:var(--primary); background:var(--bg2); box-shadow:0 0 0 3px rgba(79,124,255,.15); }
+.search-icon { position:absolute; left:28px; top:50%; transform:translateY(-50%); margin-top:-5px; color:var(--text2); font-size:13px; pointer-events:none; }
+.peers { flex:1; overflow-y:auto; padding:4px 10px; }
+.peers::-webkit-scrollbar { width:5px; }
+.peers::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+.peer { padding:10px 12px; border-radius:12px; cursor:pointer; display:flex; align-items:center; gap:11px; transition:background .12s; margin-bottom:2px; }
 .peer:hover { background:var(--hover); }
-.peer.active { background:var(--msg-out); border:1px solid var(--primary); }
-.peer .name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:130px; }
-.peer .pk { color:var(--text2); font-size:10px; }
-.peer .del { color:var(--danger); display:none; cursor:pointer; font-size:14px; }
-.peer:hover .del { display:inline; }
-.add-btn { margin:8px 10px; padding:7px 0; background:var(--primary); border:none; color:#fff; border-radius:5px; cursor:pointer; font-size:12px; text-align:center; }
+.peer.active { background:rgba(79,124,255,.1); }
+.avatar { width:38px; height:38px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:700; }
+.peer-info { flex:1; min-width:0; }
+.peer .name { font-weight:600; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.peer .pk { color:var(--text2); font-size:10.5px; font-family:"SF Mono",Menlo,monospace; }
+.badge { min-width:19px; height:19px; padding:0 5px; border-radius:10px; background:var(--danger); color:#fff; font-size:10.5px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.peer .del { color:var(--text2); opacity:0; cursor:pointer; font-size:15px; padding:4px; border-radius:6px; transition:all .12s; }
+.peer:hover .del { opacity:1; }
+.peer .del:hover { color:var(--danger); background:var(--bg3); }
+.add-btn { margin:10px 16px 16px; padding:11px 0; background:linear-gradient(135deg,#4f7cff,#3b63e0); border:none; color:#fff; border-radius:12px; cursor:pointer; font-size:13px; font-weight:600; text-align:center; transition:all .15s; box-shadow:0 4px 12px rgba(79,124,255,.3); }
+.add-btn:hover { transform:translateY(-1px); box-shadow:0 6px 16px rgba(79,124,255,.4); }
+
+/* ── Main ── */
 .main { flex:1; display:flex; flex-direction:column; min-width:0; }
-.header { padding:10px 16px; border-bottom:1px solid var(--border); background:var(--bg2); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
-.header .title { font-weight:600; font-size:14px; }
-.header .status { font-size:11px; }
-.status.on { color:var(--success); }
-.status.off { color:var(--danger); }
-.typing { font-size:11px; color:var(--text2); padding:4px 16px; height:22px; flex-shrink:0; }
-.msgs { flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:4px; background:var(--bg); }
-.msg { max-width:72%; padding:8px 12px; border-radius:8px; font-size:13px; animation: fadeIn .15s; position:relative; }
-@keyframes fadeIn { from{opacity:0} to{opacity:1} }
-.msg.in { align-self:flex-start; background:var(--msg-in); border:1px solid var(--border); }
-.msg.out { align-self:flex-end; background:var(--msg-out); border:1px solid var(--primary); }
-.msg .meta { font-size:10px; color:var(--text2); margin-bottom:3px; display:flex; justify-content:space-between; }
+.header { padding:14px 24px; border-bottom:1px solid var(--border); background:var(--bg2); display:flex; align-items:center; gap:12px; flex-shrink:0; }
+.header-avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:700; }
+.header .title { font-weight:700; font-size:15px; }
+.header .subtitle { font-size:11px; color:var(--text2); }
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:5px; }
+.dot.on { background:var(--success); box-shadow:0 0 6px var(--success); }
+.dot.off { background:var(--text2); }
+.header .status { font-size:11.5px; color:var(--text2); display:flex; align-items:center; }
+.theme-toggle { cursor:pointer; font-size:11.5px; color:var(--text2); user-select:none; padding:6px 12px; border-radius:8px; border:1px solid var(--border); transition:all .15s; font-weight:600; }
+.theme-toggle:hover { color:var(--primary); border-color:var(--primary); }
+.typing { font-size:11.5px; color:var(--primary); padding:6px 24px; height:28px; flex-shrink:0; font-style:italic; }
+
+/* ── Messages ── */
+.msgs { flex:1; overflow-y:auto; padding:20px 24px; display:flex; flex-direction:column; gap:10px; }
+.msgs::-webkit-scrollbar { width:5px; }
+.msgs::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+.msg-row { display:flex; gap:9px; animation:slideUp .18s ease-out; }
+@keyframes slideUp { from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)} }
+.msg-row.out { flex-direction:row-reverse; }
+.msg-avatar { width:30px; height:30px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:700; margin-top:2px; }
+.msg { max-width:62%; padding:10px 14px; border-radius:16px; font-size:13.5px; position:relative; box-shadow:var(--shadow-sm); }
+.msg-row.in .msg { background:var(--msg-in); border:1px solid var(--border); border-bottom-left-radius:5px; }
+.msg-row.out .msg { background:var(--msg-out); color:#fff; border-bottom-right-radius:5px; }
+.msg .meta { font-size:10px; margin-bottom:3px; display:flex; justify-content:space-between; gap:10px; opacity:.65; }
 .msg .body { word-break:break-word; white-space:pre-wrap; }
-.msg .rx { font-size:13px; margin-top:3px; }
-.msg .actions { display:none; position:absolute; top:-14px; right:4px; background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:1px 2px; }
-.msg:hover .actions { display:flex; gap:1px; }
-.actions button { background:none; border:none; color:var(--text); font-size:11px; cursor:pointer; padding:1px 3px; }
-.actions button:hover { background:var(--hover); border-radius:2px; }
-.input-bar { padding:10px 16px; border-top:1px solid var(--border); background:var(--bg2); display:flex; gap:6px; flex-shrink:0; }
-.input-bar input { flex:1; padding:8px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-family:inherit; font-size:13px; }
-.input-bar input:focus { outline:none; border-color:var(--primary); }
-.input-bar button { padding:8px 14px; border-radius:6px; border:none; cursor:pointer; font-family:inherit; font-size:13px; }
-.btn-send { background:var(--primary); color:#fff; }
-.btn-send:hover { opacity:0.85; }
-.btn-file { background:var(--hover); color:var(--text); }
-.btn-file:hover { opacity:0.7; }
-.empty { color:var(--text2); text-align:center; margin-top:60px; line-height:1.8; }
-.empty small { opacity:0.6; }
-.theme-toggle { cursor:pointer; font-size:11px; color:var(--text2); user-select:none; }
-.theme-toggle:hover { color:var(--primary); }
-.toggle-track { display:inline-block; width:32px; height:18px; background:var(--border); border-radius:9px; position:relative; transition:background .2s; vertical-align:middle; }
-.toggle-track.on { background:var(--primary); }
-.toggle-knob { position:absolute; top:2px; left:2px; width:14px; height:14px; background:#fff; border-radius:50%; transition:left .2s; }
-.toggle-track.on .toggle-knob { left:16px; }
-.progress-bar { margin-top:6px; height:14px; background:var(--border); border-radius:3px; overflow:hidden; position:relative; }
-.progress-fill { height:100%; background:var(--primary); border-radius:3px; transition:width .1s; }
-.progress-bar span { position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; line-height:14px; color:#fff; }
+.msg .rx { font-size:14px; margin-top:4px; }
+.msg .actions { display:none; position:absolute; top:-16px; right:0; background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:2px 4px; box-shadow:var(--shadow); z-index:5; }
+.msg:hover .actions { display:flex; gap:2px; }
+.actions button { background:none; border:none; font-size:13px; cursor:pointer; padding:3px 5px; border-radius:6px; transition:background .1s; }
+.actions button:hover { background:var(--hover); }
+.tick { font-size:10px; }
+.tick.read { color:#7ec8ff; }
+
+/* ── Empty state ── */
+.empty { margin:auto; text-align:center; color:var(--text2); }
+.empty-icon { width:72px; height:72px; margin:0 auto 18px; border-radius:22px; background:linear-gradient(135deg,#4f7cff22,#3b63e011); display:flex; align-items:center; justify-content:center; font-size:32px; }
+.empty h3 { color:var(--text); font-size:17px; margin-bottom:8px; font-weight:700; }
+.empty p { font-size:12.5px; line-height:1.8; max-width:340px; }
+.empty .lock { color:var(--success); }
+
+/* ── Input bar ── */
+.input-bar { padding:14px 24px 18px; background:var(--bg2); border-top:1px solid var(--border); display:flex; gap:10px; align-items:center; flex-shrink:0; }
+.input-bar input { flex:1; padding:12px 16px; border-radius:24px; border:1px solid var(--border); background:var(--bg3); color:var(--text); font-family:inherit; font-size:13.5px; transition:all .15s; }
+.input-bar input:focus { outline:none; border-color:var(--primary); background:var(--bg2); box-shadow:0 0 0 3px rgba(79,124,255,.15); }
+.icon-btn { width:42px; height:42px; border-radius:50%; border:none; cursor:pointer; font-size:17px; display:flex; align-items:center; justify-content:center; transition:all .15s; flex-shrink:0; }
+.btn-file { background:var(--bg3); color:var(--text2); border:1px solid var(--border); }
+.btn-file:hover { color:var(--primary); border-color:var(--primary); transform:translateY(-1px); }
+.btn-send { background:linear-gradient(135deg,#4f7cff,#3b63e0); color:#fff; box-shadow:0 4px 12px rgba(79,124,255,.35); }
+.btn-send:hover { transform:translateY(-1px) scale(1.04); box-shadow:0 6px 16px rgba(79,124,255,.45); }
+
+/* ── Progress ── */
+.progress-bar { margin-top:7px; height:16px; background:rgba(0,0,0,.12); border-radius:8px; overflow:hidden; position:relative; }
+.progress-fill { height:100%; background:linear-gradient(90deg,#4f7cff,#6b8cff); border-radius:8px; transition:width .15s; }
+.progress-bar span { position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; line-height:16px; color:#fff; font-weight:600; }
 </style>
 </head>
 <body>
 <div id="app">
   <div class="sidebar">
-    <h2 style="cursor:pointer" @click="currentPeer=null;messages=[]">CipherPipe</h2>
-    <div class="sidebar-actions">
-      <button v-if="!myPubkey" @click="createIdentity">创建身份</button>
+    <div class="brand" @click="currentPeer=null;messages=[]">
+      <div class="brand-logo">C</div>
+      <div>
+        <div class="brand-name">CipherPipe</div>
+        <div class="brand-tag">端到端加密管道</div>
+      </div>
     </div>
-    <div v-if="myPubkey" style="padding:6px 10px;font-size:10px;color:var(--text2)">
-      <div style="word-break:break-all;margin-bottom:4px">我的公钥：{{ myPubkey }}</div>
-      <a @click.prevent="copyPubkey" style="color:var(--primary);cursor:pointer;margin-right:8px">{{ copied ? '已复制 ✓' : '复制' }}</a>
-      <a @click.prevent="createIdentity" style="color:var(--danger);cursor:pointer">重新生成</a>
+    <div class="sidebar-actions" v-if="!myPubkey">
+      <button @click="createIdentity">创建身份</button>
     </div>
-    <input class="search" v-model="searchQuery" placeholder="搜索消息..." @input="search">
+    <div class="identity" v-if="myPubkey">
+      <div class="identity-label">我的公钥</div>
+      <div class="identity-pk">{{ myPubkey.slice(0,20) }}...{{ myPubkey.slice(-8) }}</div>
+      <div class="identity-actions">
+        <a @click.prevent="copyPubkey">{{ copied ? '已复制 ✓' : '复制完整公钥' }}</a>
+        <a class="danger" @click.prevent="createIdentity">重新生成</a>
+      </div>
+    </div>
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input class="search" v-model="searchQuery" placeholder="搜索消息..." @input="search">
+    </div>
     <div class="peers">
       <div v-for="p in peers" :key="p.pubkey"
            :class="['peer', {active: currentPeer === p.pubkey}]"
            @click="switchPeer(p.pubkey)">
-        <div>
+        <div class="avatar" :style="{background: avatarColor(p.pubkey)}">{{ (p.petname || p.pubkey).slice(0,1).toUpperCase() }}</div>
+        <div class="peer-info">
           <div class="name">{{ p.petname || p.pubkey.slice(0,12)+'...' }}</div>
-          <div class="pk">{{ p.pubkey.slice(0,8) }}...</div>
+          <div class="pk">{{ p.lastMsg || p.pubkey.slice(0,10)+'...' }}</div>
         </div>
+        <span v-if="p.unread" class="badge">{{ p.unread > 99 ? '99+' : p.unread }}</span>
         <span class="del" @click.stop="delPeer(p.pubkey)">✕</span>
       </div>
     </div>
@@ -106,41 +165,55 @@ body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,Blin
 
   <div class="main">
     <div class="header">
-      <span class="title">{{ chatTitle }}</span>
+      <template v-if="currentPeer">
+        <div class="header-avatar" :style="{background: avatarColor(currentPeer)}">{{ chatTitle.slice(0,1).toUpperCase() }}</div>
+        <div>
+          <div class="title">{{ chatTitle }}</div>
+          <div class="subtitle">{{ currentPeer.slice(0,16) }}...</div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="title">CipherPipe</div>
+      </template>
       <span style="flex:1"></span>
-      <span v-if="currentPeer" :class="['status', peerOnline ? 'on' : 'off']" style="margin-right:12px">{{ peerOnline ? '在线' : '离线' }}</span>
-      <span class="theme-toggle" @click="toggleTheme">{{ dark ? '日间模式' : '夜间模式' }}</span>
+      <span v-if="currentPeer" class="status">
+        <span :class="['dot', peerOnline ? 'on' : 'off']"></span>{{ peerOnline ? '在线' : '离线' }}
+      </span>
+      <span class="theme-toggle" @click="toggleTheme">{{ dark ? '☀ 日间' : '☾ 夜间' }}</span>
     </div>
     <div class="typing">{{ typingText }}</div>
     <div class="msgs" ref="msgContainer">
       <div v-if="!currentPeer" class="empty">
-        添加联系人公钥开始聊天<br>
-        <small>NIP-44 端到端加密 · 去中心化模式 · 数据通过全球 Nostr relay 网络传输，不经过中心服务器</small>
+        <div class="empty-icon">🔐</div>
+        <h3>安全通信，从添加联系人开始</h3>
+        <p><span class="lock">🔒</span> 端到端加密 · 去中心化<br>数据通过全球 Nostr relay 网络传输<br>不经过任何中心服务器</p>
       </div>
-      <div v-for="m in messages" :key="m.id"
-           :class="['msg', m.dir]"
-           @mouseenter="m.hover=true" @mouseleave="m.hover=false">
-        <div v-if="m.hover" class="actions">
-          <button @click="react(m, '👍')">👍</button>
-          <button @click="react(m, '❤️')">❤️</button>
-          <button @click="react(m, '😂')">😂</button>
-          <button @click="react(m, '🔥')">🔥</button>
-          <button @click="delMsg(m)">✕</button>
+      <div v-for="m in messages" :key="m.id" :class="['msg-row', m.dir]">
+        <div class="msg-avatar" :style="{background: avatarColor(m.dir === 'out' ? myPubkey : (m.from||'?'))}">{{ (m.dir === 'out' ? 'me' : (m.from||'?')).slice(0,1).toUpperCase() }}</div>
+        <div :class="['msg']"
+             @mouseenter="m.hover=true" @mouseleave="m.hover=false">
+          <div v-if="m.hover" class="actions">
+            <button @click="react(m, '👍')">👍</button>
+            <button @click="react(m, '❤️')">❤️</button>
+            <button @click="react(m, '😂')">😂</button>
+            <button @click="react(m, '🔥')">🔥</button>
+            <button @click="delMsg(m)">✕</button>
+          </div>
+          <div class="meta">
+            <span>{{ m.dir === 'out' ? 'me' : m.from }}</span>
+            <span v-if="m.dir==='out'" :class="['tick', {read: m.delivered}]">✓✓</span>
+          </div>
+          <div class="body">{{ m.text }}</div>
+          <div v-if="m.progress != null" class="progress-bar"><div class="progress-fill" :style="{width: m.progress+'%'}"></div><span>{{ m.progress }}%</span></div>
+          <div v-if="m.reactions" class="rx">{{ m.reactions }}</div>
         </div>
-        <div class="meta">
-          <span>{{ m.dir === 'out' ? 'me' : m.from }} 🔒</span>
-          <span v-if="m.dir==='out'" :style="{color: m.delivered ? '#58a6ff' : '#8b949e', fontSize:'10px'}">✓</span>
-        </div>
-        <div class="body">{{ m.text }}</div>
-        <div v-if="m.progress != null" class="progress-bar"><div class="progress-fill" :style="{width: m.progress+'%'}"></div><span>{{ m.progress }}%</span></div>
-        <div v-if="m.reactions" class="rx">{{ m.reactions }}</div>
       </div>
     </div>
     <div v-if="currentPeer" class="input-bar">
-      <input v-model="inputText" placeholder="消息..."
+      <button class="icon-btn btn-file" @click="sendFile" title="发送文件">📎</button>
+      <input v-model="inputText" placeholder="输入消息..."
              @keydown.enter="send" @input="onTyping">
-      <button class="btn-file" @click="sendFile" title="发送文件">+</button>
-      <button class="btn-send" @click="send">发送</button>
+      <button class="icon-btn btn-send" @click="send" title="发送">➤</button>
     </div>
   </div>
 </div>
@@ -167,6 +240,13 @@ createApp({
     let msgId = 0;
     let savedMessages = [];
     let isSearching = false;
+
+    const AVATAR_COLORS = ['#4f7cff','#9b59d0','#e5484d','#30a46c','#e8930c','#0ca6a6','#d6336c','#5c7cfa'];
+    function avatarColor(key) {
+      let h = 0;
+      for (const c of (key || '?')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+      return AVATAR_COLORS[h % AVATAR_COLORS.length];
+    }
 
     const dark = ref(localStorage.getItem('cp_dark') === '1');
     const themeLabel = computed(() => dark.value ? '日间模式' : '夜间模式');
@@ -278,13 +358,22 @@ createApp({
             }
             return;
           }
-          const sender = (msg.from || '').slice(0, 12);
-          addMsg(sender, msg.text, 'in', msg.id);
-          if (msg.id && document.visibilityState === 'visible') {
-            ws.value.send(JSON.stringify({type:'read_receipt', event_id: msg.id, peer: msg.from}));
+          // Resolve sender to a full pubkey (msg.from may be full pk or 12-char prefix)
+          const fromRaw = msg.from || '';
+          const senderFull = resolvePeer(fromRaw);
+          const sender = (senderFull || fromRaw).slice(0, 12);
+          if (senderFull && senderFull === currentPeer.value) {
+            // Message belongs to the open chat — render it
+            addMsg(sender, msg.text, 'in', msg.id);
+            if (msg.id && document.visibilityState === 'visible') {
+              ws.value.send(JSON.stringify({type:'read_receipt', event_id: msg.id, peer: msg.from}));
+            }
+          } else {
+            // Message for another chat — bump unread badge, don't render
+            bumpUnread(senderFull || fromRaw, sender, msg.text);
           }
           if (document.hidden && Notification.permission === 'granted') {
-            new Notification('CipherPipe: ' + msg.from, {body: msg.text.slice(0, 100)});
+            new Notification('CipherPipe: ' + sender, {body: (msg.text || '').slice(0, 100)});
           }
         }
         if (msg.type === 'search_results') {
@@ -314,6 +403,31 @@ createApp({
     function copyPubkey() {
       navigator.clipboard.writeText(myPubkey.value);
       copied.value = true;
+    }
+
+    // Resolve a sender (full pk or 12-char prefix) to a known peer's full pubkey
+    function resolvePeer(fromRaw) {
+      if (!fromRaw) return null;
+      if (currentPeer.value && (currentPeer.value === fromRaw || currentPeer.value.startsWith(fromRaw) || fromRaw.startsWith(currentPeer.value.slice(0,12)))) {
+        return currentPeer.value;
+      }
+      const p = peers.value.find(x => x.pubkey === fromRaw || x.pubkey.startsWith(fromRaw) || fromRaw.startsWith(x.pubkey.slice(0,12)));
+      return p ? p.pubkey : null;
+    }
+
+    // Message arrived for a chat that isn't open — track unread
+    function bumpUnread(fullPk, shortPk, text) {
+      let p = peers.value.find(x => x.pubkey === fullPk);
+      if (!p && fullPk && fullPk.length >= 60) {
+        // Unknown sender — auto-add to contact list
+        p = { pubkey: fullPk, petname: '', unread: 0 };
+        peers.value.push(p);
+        savePeers();
+      }
+      if (p) {
+        p.unread = (p.unread || 0) + 1;
+        p.lastMsg = (text || '').slice(0, 40);
+      }
     }
 
     function addMsg(from, text, dir, eventId, prepend = false, delivered = false) {
@@ -400,6 +514,8 @@ createApp({
       isSearching = false;
       searchQuery.value = '';
       peerOnline.value = false;
+      const p = peers.value.find(x => x.pubkey === pubkey);
+      if (p) p.unread = 0;
       if (ws.value && ws.value.readyState === WebSocket.OPEN) {
         ws.value.send(JSON.stringify({type:'history', peer: pubkey, limit: 50}));
         ws.value.send(JSON.stringify({type:'peer_status', pubkey}));
@@ -439,7 +555,7 @@ createApp({
 
     return {
       currentPeer, myPubkey, copied, dark, peers, messages, inputText, searchQuery, statusText, statusClass,
-      typingText, chatTitle, isChatOpen, msgContainer, themeLabel, toggleTheme,
+      typingText, chatTitle, isChatOpen, msgContainer, themeLabel, toggleTheme, avatarColor,
       send, sendFile, onTyping, react, delMsg, addPeer, delPeer, switchPeer, search, createIdentity, copyPubkey
     };
   }

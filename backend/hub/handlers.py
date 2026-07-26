@@ -41,8 +41,25 @@ class HubContext:
         self.log_event = log_event
         self.logger = logger
 
+    def _resolve_peer(self, short_pk):
+        """Resolve 12-char pubkey prefix → full 66-char pubkey."""
+        # Already full-length
+        if len(short_pk) >= 64:
+            return short_pk
+        # Check active lan clients
+        for full in self.lan_clients:
+            if full.startswith(short_pk):
+                return full
+        # Check watched pubkeys (Nostr 64-char format)
+        for npk in self.watched_pubkeys:
+            full = "02" + npk
+            if full.startswith(short_pk):
+                return full
+        return short_pk
+
     async def ensure_watched(self, peer):
         """Subscribe relays to a new peer pubkey if not already watched."""
+        peer = self._resolve_peer(peer)
         nostr_pk = to_nostr_pk(peer)
         if nostr_pk not in self.watched_pubkeys:
             self.watched_pubkeys.add(nostr_pk)
@@ -51,6 +68,7 @@ class HubContext:
 
     async def send_encrypted(self, peer, payload, extra_tags=None):
         """Encrypt payload for peer and publish via Nostr relays."""
+        peer = self._resolve_peer(peer)
         nostr_pk = await self.ensure_watched(peer)
         encrypted = e2e_encrypt(self.sk, peer, payload)
         tags = [["p", nostr_pk]] + (extra_tags or [])

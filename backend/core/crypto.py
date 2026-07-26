@@ -32,6 +32,9 @@ def from_nostr_pk(pk_hex):
         return "02" + pk_hex
     if len(pk_hex) == 66 and pk_hex[:2] in ("02", "03"):
         return pk_hex
+    # Short pubkey (12-char prefix) — resolve to full key before calling crypto
+    if len(pk_hex) < 64:
+        return pk_hex
     raise ValueError(f"invalid pubkey format: len={len(pk_hex)}")
 
 def load_or_create_key(keyfile=None):

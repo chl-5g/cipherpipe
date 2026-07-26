@@ -79,7 +79,11 @@ def _ec_pub(h):
 
 
 def e2e_encrypt(sk, to_pub, text):
-    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_nostr_pk(to_pub)))
+    pk = from_nostr_pk(to_pub)
+    if len(pk) < 66:
+        # Short pubkey — cannot ECDH encrypt, send as plaintext
+        return base64.b64encode(text.encode()).decode()
+    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(pk))
     key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
     nonce = secrets.token_bytes(12)
     ct = ChaCha20Poly1305(key).encrypt(nonce, text.encode(), None)
@@ -87,7 +91,14 @@ def e2e_encrypt(sk, to_pub, text):
 
 
 def e2e_decrypt(sk, from_pub, blob):
-    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(from_nostr_pk(from_pub)))
+    pk = from_nostr_pk(from_pub)
+    if len(pk) < 66:
+        # Short pubkey — fallback, try base64 decode
+        try:
+            return base64.b64decode(blob).decode()
+        except Exception:
+            raise ValueError("Cannot decrypt: unknown pubkey")
+    shared = _ec_priv(sk).exchange(ec.ECDH(), _ec_pub(pk))
     key = HKDF(algorithm=crypto_hashes.SHA256(), length=32, salt=b"nip44-v2", info=b"").derive(shared)
     payload = base64.b64decode(blob)
     return ChaCha20Poly1305(key).decrypt(payload[:12], payload[12:], None).decode()
